@@ -1,11 +1,9 @@
-import re
 import asyncio
-from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import Dict, Any, List, Union
+import re
+from typing import Dict, Any, List
 from agents.base_agent import BaseAgent
 from tools.tool_registry import ToolRegistry
 from tools.langchain_tool_adapter import LangChainToolAdapter
-from conversations.tool_message import ToolCallMessage
 from langchain_core.messages import ToolMessage, AIMessage
 
 
@@ -28,8 +26,8 @@ class CustomAgent(BaseAgent):
         """Return a description of what this agent does"""
         return self.config.get('description', f'Custom agent: {self.name}')
     
-    def _process_message(self, message: str) -> str:
-        """Process message with structured tool calling"""
+    async def _aprocess_message(self, message: str) -> str:
+        """Async process message with structured tool calling"""
         available_tools = self.get_available_tools()
         self.tool_calls_made = []  # Reset tool calls for this message
         
@@ -39,7 +37,7 @@ class CustomAgent(BaseAgent):
         # Get tools for structured calling first (preferred method for parallel execution)
         if available_tools and self.model_provider.supports_tool_calling():
             # Try structured calling first to enable parallel execution
-            structured_result = self._process_with_structured_tools(message, available_tools)
+            structured_result = await self._aprocess_with_structured_tools(message, available_tools)
             
             # If structured calling didn't produce tool calls, fall back to forced detection
             if not hasattr(self, '_last_had_tool_calls') or not self._last_had_tool_calls:
@@ -47,15 +45,19 @@ class CustomAgent(BaseAgent):
                 if forced_tool_call:
                     if self.debug_mode:
                         print(f"🔧 DEBUG: Falling back to forced tool call: {forced_tool_call}")
-                    return self._execute_forced_tool_call(forced_tool_call)
+                    return await self._aexecute_forced_tool_call(forced_tool_call)
             
             return structured_result
         else:
             # Fallback to regular processing without tools
-            return super()._process_message(message)
+            return await super()._aprocess_message(message)
     
-    def _process_with_structured_tools(self, message: str, available_tool_names: List[str]) -> str:
-        """Process message using structured tool calling"""
+    def _process_message(self, message: str) -> str:
+        """Synchronous process message (for backward compatibility)"""
+        return asyncio.run(self._aprocess_message(message))
+    
+    async def _aprocess_with_structured_tools(self, message: str, available_tool_names: List[str]) -> str:
+        """Async process message using structured tool calling"""
         # Get tool instances
         tools = []
         for tool_name in available_tool_names:
@@ -64,7 +66,7 @@ class CustomAgent(BaseAgent):
                 tools.append(tool)
         
         if not tools:
-            return super()._process_message(message)
+            return await super()._aprocess_message(message)
         
         # Convert to LangChain tools
         langchain_tools = LangChainToolAdapter.convert_tools(tools)
@@ -72,8 +74,8 @@ class CustomAgent(BaseAgent):
         if self.debug_mode:
             print(f"🔧 DEBUG: Converted {len(langchain_tools)} tools for structured calling")
         
-        # Invoke model with tools
-        response = self.model_provider.invoke_with_tools(
+        # Async invoke model with tools
+        response = await self.model_provider.ainvoke_with_tools(
             self.conversation_history, 
             langchain_tools
         )
@@ -83,14 +85,18 @@ class CustomAgent(BaseAgent):
         
         # Handle structured response
         if isinstance(response, dict) and 'tool_calls' in response:
-            return self._handle_structured_tool_calls(response)
+            return await self._ahandle_structured_tool_calls(response)
         else:
             # No tool calls, return regular response
             self._last_had_tool_calls = False
             return str(response)
     
-    def _handle_structured_tool_calls(self, response: Dict[str, Any]) -> str:
-        """Handle structured tool calls from the model"""
+    def _process_with_structured_tools(self, message: str, available_tool_names: List[str]) -> str:
+        """Synchronous process with structured tools (for backward compatibility)"""
+        return asyncio.run(self._aprocess_with_structured_tools(message, available_tool_names))
+    
+    async def _ahandle_structured_tool_calls(self, response: Dict[str, Any]) -> str:
+        """Async handle structured tool calls from the model"""
         content = response.get('content', '')
         tool_calls = response.get('tool_calls', [])
         
@@ -112,9 +118,9 @@ class CustomAgent(BaseAgent):
         
         # Execute tools (parallel or sequential based on configuration)
         if self.parallel_execution and len(tool_calls) > 1:
-            tool_messages, tool_results = self._execute_tools_parallel(tool_calls)
+            tool_messages, tool_results = await self._aexecute_tools_parallel(tool_calls)
         else:
-            tool_messages, tool_results = self._execute_tools_sequential(tool_calls)
+            tool_messages, tool_results = await self._aexecute_tools_sequential(tool_calls)
         
         # Add all tool messages to conversation history
         self.conversation_history.extend(tool_messages)
@@ -128,8 +134,12 @@ class CustomAgent(BaseAgent):
         else:
             return content or "No tool results available."
     
-    def _execute_single_tool(self, tool_call: Dict[str, Any]) -> Dict[str, Any]:
-        """Execute a single tool call and return the result info"""
+    def _handle_structured_tool_calls(self, response: Dict[str, Any]) -> str:
+        """Synchronous handle structured tool calls (for backward compatibility)"""
+        return asyncio.run(self._ahandle_structured_tool_calls(response))
+    
+    async def _aexecute_single_tool(self, tool_call: Dict[str, Any]) -> Dict[str, Any]:
+        """Async execute a single tool call and return the result info"""
         tool_name = tool_call['name']
         tool_args = tool_call['args']
         tool_call_id = tool_call.get('id', '')
@@ -138,8 +148,11 @@ class CustomAgent(BaseAgent):
             if self.debug_mode:
                 print(f"🔧 DEBUG: Executing tool {tool_name} with args: {tool_args}")
             
-            # Execute the tool
-            result = self.tool_registry.execute_tool(tool_name, **tool_args)
+            # Execute the tool (run in thread pool if it's not async)
+            # Use a lambda to handle kwargs properly
+            result = await asyncio.get_event_loop().run_in_executor(
+                None, lambda: self.tool_registry.execute_tool(tool_name, **tool_args)
+            )
             
             # Store tool call info
             tool_call_info = {
@@ -195,8 +208,12 @@ class CustomAgent(BaseAgent):
                 'formatted_display': f"**Tool Error**: {str(e)}"
             }
     
-    def _execute_tools_sequential(self, tool_calls: List[Dict[str, Any]]) -> tuple:
-        """Execute tools sequentially (original behavior)"""
+    def _execute_single_tool(self, tool_call: Dict[str, Any]) -> Dict[str, Any]:
+        """Synchronous execute single tool (for backward compatibility)"""
+        return asyncio.run(self._aexecute_single_tool(tool_call))
+    
+    async def _aexecute_tools_sequential(self, tool_calls: List[Dict[str, Any]]) -> tuple:
+        """Async execute tools sequentially"""
         tool_messages = []
         tool_results = []
         
@@ -204,75 +221,73 @@ class CustomAgent(BaseAgent):
             print(f"🔧 DEBUG: Executing {len(tool_calls)} tools sequentially")
         
         for tool_call in tool_calls:
-            result_info = self._execute_single_tool(tool_call)
+            result_info = await self._aexecute_single_tool(tool_call)
             self.tool_calls_made.append(result_info['tool_call_info'])
             tool_messages.append(result_info['tool_message'])
             tool_results.append(result_info['formatted_display'])
         
         return tool_messages, tool_results
     
-    def _execute_tools_parallel(self, tool_calls: List[Dict[str, Any]]) -> tuple:
-        """Execute tools in parallel using ThreadPoolExecutor"""
+    def _execute_tools_sequential(self, tool_calls: List[Dict[str, Any]]) -> tuple:
+        """Synchronous execute tools sequentially (for backward compatibility)"""
+        return asyncio.run(self._aexecute_tools_sequential(tool_calls))
+    
+    async def _aexecute_tools_parallel(self, tool_calls: List[Dict[str, Any]]) -> tuple:
+        """Async execute tools in parallel using asyncio.gather"""
         tool_messages = []
         tool_results = []
         
         if self.debug_mode:
-            print(f"🔧 DEBUG: Executing {len(tool_calls)} tools in parallel (max workers: {self.max_parallel_tools})")
+            print(f"🔧 DEBUG: Executing {len(tool_calls)} tools in parallel asynchronously")
         
-        # Limit the number of concurrent tools
-        max_workers = min(self.max_parallel_tools, len(tool_calls))
-        
-        with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            # Submit all tool calls
-            future_to_tool_call = {
-                executor.submit(self._execute_single_tool, tool_call): tool_call 
-                for tool_call in tool_calls
-            }
+        try:
+            # Execute all tools concurrently using asyncio.gather
+            results = await asyncio.gather(
+                *[self._aexecute_single_tool(tool_call) for tool_call in tool_calls],
+                return_exceptions=True
+            )
             
-            # Collect results as they complete
-            results_with_order = []
-            for future in as_completed(future_to_tool_call):
-                tool_call = future_to_tool_call[future]
-                try:
-                    result_info = future.result()
-                    # Store original order for consistent output
-                    original_index = tool_calls.index(tool_call)
-                    results_with_order.append((original_index, result_info))
-                    
+            # Process results in order
+            for i, result_info in enumerate(results):
+                if isinstance(result_info, Exception):
+                    # Handle exception result
+                    tool_call = tool_calls[i]
                     if self.debug_mode:
-                        print(f"🔧 DEBUG: Completed tool {tool_call['name']}")
-                        
-                except Exception as e:
-                    if self.debug_mode:
-                        print(f"🔧 DEBUG: Parallel execution error for {tool_call.get('name', 'unknown')}: {str(e)}")
+                        print(f"🔧 DEBUG: Parallel execution error for {tool_call.get('name', 'unknown')}: {str(result_info)}")
                     
-                    # Create error result if parallel execution fails
                     error_result = {
                         'tool_call_info': {
                             'tool_name': tool_call.get('name', 'unknown'),
                             'params': tool_call.get('args', {}),
-                            'result': str(e),
+                            'result': str(result_info),
                             'success': False
                         },
                         'tool_message': ToolMessage(
-                            content=f"Parallel execution error: {str(e)}",
+                            content=f"Parallel execution error: {str(result_info)}",
                             tool_call_id=tool_call.get('id', '')
                         ),
-                        'formatted_display': f"**Parallel Error**: {str(e)}"
+                        'formatted_display': f"**Parallel Error**: {str(result_info)}"
                     }
-                    original_index = tool_calls.index(tool_call)
-                    results_with_order.append((original_index, error_result))
+                    result_info = error_result
+                
+                # Add successful or error results
+                self.tool_calls_made.append(result_info['tool_call_info'])
+                tool_messages.append(result_info['tool_message'])
+                tool_results.append(result_info['formatted_display'])
+                
+                if self.debug_mode and not isinstance(results[i], Exception):
+                    print(f"🔧 DEBUG: Completed tool {tool_calls[i]['name']}")
         
-        # Sort results by original order to maintain consistency
-        results_with_order.sort(key=lambda x: x[0])
-        
-        # Extract sorted results
-        for _, result_info in results_with_order:
-            self.tool_calls_made.append(result_info['tool_call_info'])
-            tool_messages.append(result_info['tool_message'])
-            tool_results.append(result_info['formatted_display'])
+        except Exception as e:
+            if self.debug_mode:
+                print(f"🔧 DEBUG: Fatal error in parallel execution: {str(e)}")
+            raise
         
         return tool_messages, tool_results
+    
+    def _execute_tools_parallel(self, tool_calls: List[Dict[str, Any]]) -> tuple:
+        """Synchronous execute tools in parallel (for backward compatibility)"""
+        return asyncio.run(self._aexecute_tools_parallel(tool_calls))
     
     def _create_tool_enhanced_prompt(self, message: str, available_tools: list) -> str:
         """Create an enhanced prompt that includes available tools"""
@@ -494,14 +509,16 @@ User request: {message}"""
         # If we can't parse, return None
         return None
     
-    def _execute_forced_tool_call(self, tool_call_info: dict) -> str:
-        """Execute a forced tool call and format the response"""
+    async def _aexecute_forced_tool_call(self, tool_call_info: dict) -> str:
+        """Async execute a forced tool call and format the response"""
         tool_name = tool_call_info['tool_name']
         params = tool_call_info['params']
         
         try:
             # Execute the tool
-            result = self.tool_registry.execute_tool(tool_name, **params)
+            result = await asyncio.get_event_loop().run_in_executor(
+                None, lambda: self.tool_registry.execute_tool(tool_name, **params)
+            )
             
             # Store tool call info
             tool_call_record = {
@@ -547,6 +564,10 @@ User request: {message}"""
             self.tool_calls_made.append(tool_call_record)
             
             return f"I tried to calculate that but encountered an error: {str(e)}"
+    
+    def _execute_forced_tool_call(self, tool_call_info: dict) -> str:
+        """Synchronous execute forced tool call (for backward compatibility)"""
+        return asyncio.run(self._aexecute_forced_tool_call(tool_call_info))
     
     def enable_debug(self):
         """Enable debug mode"""

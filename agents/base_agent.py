@@ -1,3 +1,4 @@
+import asyncio
 import json
 import os
 import uuid
@@ -50,8 +51,8 @@ class BaseAgent(ABC):
         message = SystemMessage(content=content)
         self.conversation_history.append(message)
         
-    def invoke(self, message: str, save_conversation: bool = True) -> str:
-        """Main method to invoke the agent with a message"""
+    async def ainvoke(self, message: str, save_conversation: bool = True) -> str:
+        """Async main method to invoke the agent with a message"""
         # Add user message to history
         user_message = HumanMessage(content=message)
         self.conversation_history.append(user_message)
@@ -62,7 +63,7 @@ class BaseAgent(ABC):
             self.add_system_message(system_prompt)
         
         # Process the message (can be overridden by subclasses)
-        response = self._process_message(message)
+        response = await self._aprocess_message(message)
         
         # Add AI response to history
         ai_message = AIMessage(content=response)
@@ -82,23 +83,56 @@ class BaseAgent(ABC):
         
         return response
     
-    def _process_message(self, message: str) -> str:
-        """Process the message using the configured model provider"""
-        response = self.model_provider.invoke(self.conversation_history)
+    def invoke(self, message: str, save_conversation: bool = True) -> str:
+        """Synchronous invoke (for backward compatibility) - runs async version"""
+        return asyncio.run(self.ainvoke(message, save_conversation))
+    
+    async def _aprocess_message(self, message: str) -> str:
+        """Async process the message using the configured model provider"""
+        response = await self.model_provider.ainvoke(self.conversation_history)
         return response
     
-    def call_agent(self, agent_name: str, message: str) -> str:
-        """Call another agent as a tool"""
+    def _process_message(self, message: str) -> str:
+        """Synchronous process message (for backward compatibility) - runs async version"""
+        return asyncio.run(self._aprocess_message(message))
+    
+    async def acall_agent(self, agent_name: str, message: str, save_conversation: bool = True) -> str:
+        """Async call another agent as a tool"""
         from agents.agent_registry import AgentRegistry
         
         registry = AgentRegistry()
         other_agent = registry.get_agent(agent_name)
         
         if not other_agent:
-            return f"Agent '{agent_name}' not found"
+            # Try to load agents from config first
+            try:
+                registry.load_agents_from_config()
+                other_agent = registry.get_agent(agent_name)
+            except Exception:
+                pass
         
-        response = other_agent.invoke(message)
+        if not other_agent:
+            available_agents = list(registry.list_agents().keys())
+            return f"Agent '{agent_name}' not found. Available agents: {available_agents}"
+        
+        response = await other_agent.ainvoke(message, save_conversation=save_conversation)
         return response
+    
+    def call_agent(self, agent_name: str, message: str, save_conversation: bool = True) -> str:
+        """Synchronous call agent (for backward compatibility) - runs async version"""
+        return asyncio.run(self.acall_agent(agent_name, message, save_conversation))
+    
+    def get_available_agents(self) -> Dict[str, str]:
+        """Get list of all available agents in the system"""
+        from agents.agent_registry import AgentRegistry
+        
+        registry = AgentRegistry()
+        try:
+            registry.load_agents_from_config()
+        except Exception:
+            pass
+        
+        return registry.list_agents()
     
     def get_available_tools(self) -> List[str]:
         """Get list of available tools for this agent"""

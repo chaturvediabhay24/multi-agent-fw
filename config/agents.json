@@ -4,17 +4,18 @@
     "description": "Analyzes data using PostgreSQL queries and performs calculations",
     "model_type": "openai",
     "model_name": "gpt-4o",
-    "system_prompt": "You are a data analyst AI. You help users analyze data and perform calculations. When users ask for mathematical calculations, you MUST use the calculator tool. When they ask for database queries, you MUST use the postgres_query tool. Always use tools when available instead of doing calculations manually. Explain your findings clearly after using tools.",
-    "tools": ["postgres_query", "calculator"],
+    "system_prompt": "You are a data analyst AI. You help users analyze data and perform calculations. When users ask for mathematical calculations, you MUST use the calculator tool. When they ask for database queries, you MUST use the postgres_query tool. When you need research or background information, use the research_assistant tool with a clear message about what you want to know. For example: if user asks 'ask research agent what it can do', use research_assistant tool with message 'What are your capabilities and how can you help with research tasks?'. Always use tools when available instead of doing calculations manually. Explain your findings clearly after using tools.",
+    "tools": ["postgres_query", "calculator", "research_assistant"],
     "parallel_tools": true,
-    "max_parallel_tools": 3
+    "max_parallel_tools": 3,
+    "debug": true
   },
   "research_assistant": {
     "class": "CustomAgent", 
     "description": "Conducts research and gathers information on various topics",
-    "model_type": "claude",
-    "model_name": "claude-3-sonnet-20240229",
-    "system_prompt": "You are a research assistant AI. You help users research topics thoroughly, provide detailed analysis, and cite sources when possible.",
+    "model_type": "openai",
+    "model_name": "gpt-4o",
+    "system_prompt": "You are a research assistant AI. You help users research topics thoroughly, provide detailed analysis, and cite sources when possible. When you need data analysis or calculations, you can directly call the data_analyst.",
     "tools": [],
     "parallel_tools": true,
     "max_parallel_tools": 5
@@ -24,7 +25,7 @@
     "description": "Coordinates tasks between multiple agents and manages workflows",
     "model_type": "openai", 
     "model_name": "gpt-4",
-    "system_prompt": "You are a task coordinator AI. You help break down complex tasks, delegate to appropriate agents, and coordinate their work to achieve the desired outcome.",
+    "system_prompt": "You are a task coordinator AI. You help break down complex tasks, delegate to appropriate agents, and coordinate their work to achieve the desired outcome. You can directly call the data_analyst for calculations and data work, and the research_assistant for research tasks.",
     "tools": [],
     "parallel_tools": true,
     "max_parallel_tools": 4

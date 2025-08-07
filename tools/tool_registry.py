@@ -56,15 +56,41 @@ class ToolRegistry:
         return tool.execute(**kwargs)
     
     def load_tools_for_agent(self, tool_names: List[str]):
-        """Load specific tools for an agent"""
+        """Load specific tools for an agent, including dynamic agent proxy tools"""
         for tool_name in tool_names:
-            if tool_name not in self._tools and tool_name in self._available_tools:
-                try:
-                    tool_class = self._available_tools[tool_name]
-                    tool_instance = tool_class()
-                    self.register_tool(tool_name, tool_instance)
-                except Exception as e:
-                    print(f"Warning: Failed to load tool '{tool_name}': {e}")
+            if tool_name not in self._tools:
+                if tool_name in self._available_tools:
+                    # Load regular tool
+                    try:
+                        tool_class = self._available_tools[tool_name]
+                        tool_instance = tool_class()
+                        self.register_tool(tool_name, tool_instance)
+                    except Exception as e:
+                        print(f"Warning: Failed to load tool '{tool_name}': {e}")
+                else:
+                    # Check if this might be an agent name - create proxy tool
+                    if self._is_agent_name(tool_name):
+                        try:
+                            from tools.agent_proxy_tool import AgentProxyTool
+                            agent_proxy = AgentProxyTool(tool_name)
+                            self.register_tool(tool_name, agent_proxy)
+                            # Only print once when actually creating
+                            # print(f"Created agent proxy tool for '{tool_name}'")
+                        except Exception as e:
+                            print(f"Warning: Failed to create agent proxy for '{tool_name}': {e}")
+    
+    def _is_agent_name(self, tool_name: str) -> bool:
+        """Check if a tool name might be an agent name"""
+        # Import here to avoid circular imports
+        from config.config_manager import ConfigManager
+        
+        try:
+            # Check if it exists in agent configuration
+            config_manager = ConfigManager()
+            agent_configs = config_manager.get_all_agent_configs()
+            return tool_name in agent_configs
+        except Exception:
+            return False
     
     def get_available_tools(self) -> Dict[str, str]:
         """Get all available tools (not just registered ones)"""

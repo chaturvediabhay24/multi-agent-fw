@@ -102,7 +102,14 @@ def interactive_mode(agent):
                 for i, msg in enumerate(agent.conversation_history):
                     msg_type = msg.__class__.__name__.replace('Message', '')
                     content = msg.content[:100] + "..." if len(msg.content) > 100 else msg.content
-                    print(f"  {i+1}. {msg_type}: {content}")
+                    
+                    # Check if this is an AI message with tool calls
+                    if hasattr(msg, 'tool_calls') and msg.tool_calls:
+                        tool_calls_str = ", ".join([call['name'] for call in msg.tool_calls])
+                        print(f"  {i+1}. {msg_type}: {content}")
+                        print(f"      🔧 Tool calls: {tool_calls_str}")
+                    else:
+                        print(f"  {i+1}. {msg_type}: {content}")
                 continue
             
             if not user_input:

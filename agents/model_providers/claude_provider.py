@@ -24,27 +24,27 @@ class ClaudeProvider(BaseModelProvider):
                 **self.config
             )
     
-    def invoke(self, messages: List[BaseMessage]) -> str:
-        """Invoke Claude model without tools"""
+    async def ainvoke(self, messages: List[BaseMessage]) -> str:
+        """Async invoke Claude model without tools"""
         if not self.client:
             raise RuntimeError("Claude client not initialized. Check API key.")
         
-        response = self.client.invoke(messages)
+        response = await self.client.ainvoke(messages)
         return response.content
     
-    def invoke_with_tools(self, messages: List[BaseMessage], tools: List[BaseTool]) -> Union[str, dict]:
-        """Invoke Claude model with tools"""
+    async def ainvoke_with_tools(self, messages: List[BaseMessage], tools: List[BaseTool]) -> Union[str, dict]:
+        """Async invoke Claude model with tools"""
         if not self.client:
             raise RuntimeError("Claude client not initialized. Check API key.")
         
         if not tools:
-            return self.invoke(messages)
+            return await self.ainvoke(messages)
         
         # Bind tools to the client
         client_with_tools = self.client.bind_tools(tools)
         
-        # Invoke with tools
-        response = client_with_tools.invoke(messages)
+        # Async invoke with tools
+        response = await client_with_tools.ainvoke(messages)
         
         # Check if response contains tool calls
         if hasattr(response, 'tool_calls') and response.tool_calls:

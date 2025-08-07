@@ -1,3 +1,4 @@
+import asyncio
 from abc import ABC, abstractmethod
 from typing import Dict, Any, List, Optional, Union
 from langchain_core.messages import BaseMessage
@@ -13,14 +14,22 @@ class BaseModelProvider(ABC):
         self.bound_tools: List[BaseTool] = []
     
     @abstractmethod
-    def invoke(self, messages: List[BaseMessage]) -> Union[str, dict]:
-        """Invoke the model with messages and return response"""
+    async def ainvoke(self, messages: List[BaseMessage]) -> Union[str, dict]:
+        """Async invoke the model with messages and return response"""
         pass
     
     @abstractmethod
-    def invoke_with_tools(self, messages: List[BaseMessage], tools: List[BaseTool]) -> Union[str, dict]:
-        """Invoke the model with tools and return response (could include tool calls)"""
+    async def ainvoke_with_tools(self, messages: List[BaseMessage], tools: List[BaseTool]) -> Union[str, dict]:
+        """Async invoke the model with tools and return response (could include tool calls)"""
         pass
+    
+    def invoke(self, messages: List[BaseMessage]) -> Union[str, dict]:
+        """Synchronous invoke (for backward compatibility) - runs async version"""
+        return asyncio.run(self.ainvoke(messages))
+    
+    def invoke_with_tools(self, messages: List[BaseMessage], tools: List[BaseTool]) -> Union[str, dict]:
+        """Synchronous invoke with tools (for backward compatibility) - runs async version"""
+        return asyncio.run(self.ainvoke_with_tools(messages, tools))
     
     @abstractmethod
     def get_provider_name(self) -> str:
