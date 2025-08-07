@@ -5,7 +5,9 @@
     "model_type": "openai",
     "model_name": "gpt-4o",
     "system_prompt": "You are a data analyst AI. You help users analyze data and perform calculations. When users ask for mathematical calculations, you MUST use the calculator tool. When they ask for database queries, you MUST use the postgres_query tool. Always use tools when available instead of doing calculations manually. Explain your findings clearly after using tools.",
-    "tools": ["postgres_query", "calculator"]
+    "tools": ["postgres_query", "calculator"],
+    "parallel_tools": true,
+    "max_parallel_tools": 3
   },
   "research_assistant": {
     "class": "CustomAgent", 
@@ -13,7 +15,9 @@
     "model_type": "claude",
     "model_name": "claude-3-sonnet-20240229",
     "system_prompt": "You are a research assistant AI. You help users research topics thoroughly, provide detailed analysis, and cite sources when possible.",
-    "tools": []
+    "tools": [],
+    "parallel_tools": true,
+    "max_parallel_tools": 5
   },
   "task_coordinator": {
     "class": "CustomAgent",
@@ -21,6 +25,8 @@
     "model_type": "openai", 
     "model_name": "gpt-4",
     "system_prompt": "You are a task coordinator AI. You help break down complex tasks, delegate to appropriate agents, and coordinate their work to achieve the desired outcome.",
-    "tools": []
+    "tools": [],
+    "parallel_tools": true,
+    "max_parallel_tools": 4
   }
 }

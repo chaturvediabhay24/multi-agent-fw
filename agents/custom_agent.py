@@ -1,4 +1,6 @@
 import re
+import asyncio
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Dict, Any, List, Union
 from agents.base_agent import BaseAgent
 from tools.tool_registry import ToolRegistry
@@ -11,8 +13,11 @@ class CustomAgent(BaseAgent):
     def __init__(self, name: str, config: Dict[str, Any], conversation_id: str = None):
         super().__init__(name, config, conversation_id)
         self.tool_registry = ToolRegistry()
-        self.debug_mode = False
+        self.debug_mode = config.get('debug', False)
         self.tool_calls_made = []
+        self.parallel_execution = config.get('parallel_tools', True)  # Enable parallel execution by default
+        self.max_parallel_tools = config.get('max_parallel_tools', 2)  # Limit concurrent tools
+        self._last_had_tool_calls = False  # Track tool call usage for fallback logic
         
         # Load agent-specific tools
         agent_tools = self.get_available_tools()
@@ -31,16 +36,20 @@ class CustomAgent(BaseAgent):
         if self.debug_mode:
             print(f"🔧 DEBUG: Available tools: {available_tools}")
         
-        # Check if we should force tool usage (backward compatibility)
-        forced_tool_call = self._detect_forced_tool_usage(message, available_tools)
-        if forced_tool_call:
-            if self.debug_mode:
-                print(f"🔧 DEBUG: Forcing tool call: {forced_tool_call}")
-            return self._execute_forced_tool_call(forced_tool_call, message)
-        
-        # Get tools for structured calling
+        # Get tools for structured calling first (preferred method for parallel execution)
         if available_tools and self.model_provider.supports_tool_calling():
-            return self._process_with_structured_tools(message, available_tools)
+            # Try structured calling first to enable parallel execution
+            structured_result = self._process_with_structured_tools(message, available_tools)
+            
+            # If structured calling didn't produce tool calls, fall back to forced detection
+            if not hasattr(self, '_last_had_tool_calls') or not self._last_had_tool_calls:
+                forced_tool_call = self._detect_forced_tool_usage(message, available_tools)
+                if forced_tool_call:
+                    if self.debug_mode:
+                        print(f"🔧 DEBUG: Falling back to forced tool call: {forced_tool_call}")
+                    return self._execute_forced_tool_call(forced_tool_call)
+            
+            return structured_result
         else:
             # Fallback to regular processing without tools
             return super()._process_message(message)
@@ -77,6 +86,7 @@ class CustomAgent(BaseAgent):
             return self._handle_structured_tool_calls(response)
         else:
             # No tool calls, return regular response
+            self._last_had_tool_calls = False
             return str(response)
     
     def _handle_structured_tool_calls(self, response: Dict[str, Any]) -> str:
@@ -97,66 +107,14 @@ class CustomAgent(BaseAgent):
         )
         self.conversation_history.append(ai_message_with_tools)
         
-        # Then process each tool call and create tool messages
-        for tool_call in tool_calls:
-            try:
-                tool_name = tool_call['name']
-                tool_args = tool_call['args']
-                tool_call_id = tool_call.get('id', '')
-                
-                if self.debug_mode:
-                    print(f"🔧 DEBUG: Executing tool {tool_name} with args: {tool_args}")
-                
-                # Execute the tool
-                result = self.tool_registry.execute_tool(tool_name, **tool_args)
-                
-                # Store tool call info
-                tool_call_info = {
-                    'tool_name': tool_name,
-                    'params': tool_args,
-                    'result': result,
-                    'success': True
-                }
-                self.tool_calls_made.append(tool_call_info)
-                
-                # Create tool message for conversation history
-                tool_message = ToolMessage(
-                    content=str(result),
-                    tool_call_id=tool_call_id
-                )
-                tool_messages.append(tool_message)
-                
-                # Format result for display
-                if isinstance(result, dict) and 'success' in result:
-                    if result['success']:
-                        formatted_result = result.get('formatted_result', result.get('result', result))
-                        tool_results.append(f"**{tool_name}**: {formatted_result}")
-                    else:
-                        tool_results.append(f"**{tool_name} Error**: {result.get('error', 'Unknown error')}")
-                else:
-                    tool_results.append(f"**{tool_name}**: {result}")
-                    
-            except Exception as e:
-                if self.debug_mode:
-                    print(f"🔧 DEBUG: Tool execution error: {str(e)}")
-                
-                # Store failed tool call
-                tool_call_info = {
-                    'tool_name': tool_call.get('name', 'unknown'),
-                    'params': tool_call.get('args', {}),
-                    'result': str(e),
-                    'success': False
-                }
-                self.tool_calls_made.append(tool_call_info)
-                
-                # Create tool message for failed call
-                tool_message = ToolMessage(
-                    content=f"Error: {str(e)}",
-                    tool_call_id=tool_call.get('id', '')
-                )
-                tool_messages.append(tool_message)
-                
-                tool_results.append(f"**Tool Error**: {str(e)}")
+        # Track whether we had tool calls for fallback logic
+        self._last_had_tool_calls = len(tool_calls) > 0
+        
+        # Execute tools (parallel or sequential based on configuration)
+        if self.parallel_execution and len(tool_calls) > 1:
+            tool_messages, tool_results = self._execute_tools_parallel(tool_calls)
+        else:
+            tool_messages, tool_results = self._execute_tools_sequential(tool_calls)
         
         # Add all tool messages to conversation history
         self.conversation_history.extend(tool_messages)
@@ -169,6 +127,152 @@ class CustomAgent(BaseAgent):
                 return "\n".join(tool_results)
         else:
             return content or "No tool results available."
+    
+    def _execute_single_tool(self, tool_call: Dict[str, Any]) -> Dict[str, Any]:
+        """Execute a single tool call and return the result info"""
+        tool_name = tool_call['name']
+        tool_args = tool_call['args']
+        tool_call_id = tool_call.get('id', '')
+        
+        try:
+            if self.debug_mode:
+                print(f"🔧 DEBUG: Executing tool {tool_name} with args: {tool_args}")
+            
+            # Execute the tool
+            result = self.tool_registry.execute_tool(tool_name, **tool_args)
+            
+            # Store tool call info
+            tool_call_info = {
+                'tool_name': tool_name,
+                'params': tool_args,
+                'result': result,
+                'success': True
+            }
+            
+            # Create tool message for conversation history
+            tool_message = ToolMessage(
+                content=str(result),
+                tool_call_id=tool_call_id
+            )
+            
+            # Format result for display
+            if isinstance(result, dict) and 'success' in result:
+                if result['success']:
+                    formatted_result = result.get('formatted_result', result.get('result', result))
+                    formatted_display = f"**{tool_name}**: {formatted_result}"
+                else:
+                    formatted_display = f"**{tool_name} Error**: {result.get('error', 'Unknown error')}"
+            else:
+                formatted_display = f"**{tool_name}**: {result}"
+            
+            return {
+                'tool_call_info': tool_call_info,
+                'tool_message': tool_message,
+                'formatted_display': formatted_display
+            }
+            
+        except Exception as e:
+            if self.debug_mode:
+                print(f"🔧 DEBUG: Tool execution error: {str(e)}")
+            
+            # Store failed tool call
+            tool_call_info = {
+                'tool_name': tool_name,
+                'params': tool_args,
+                'result': str(e),
+                'success': False
+            }
+            
+            # Create tool message for failed call
+            tool_message = ToolMessage(
+                content=f"Error: {str(e)}",
+                tool_call_id=tool_call_id
+            )
+            
+            return {
+                'tool_call_info': tool_call_info,
+                'tool_message': tool_message,
+                'formatted_display': f"**Tool Error**: {str(e)}"
+            }
+    
+    def _execute_tools_sequential(self, tool_calls: List[Dict[str, Any]]) -> tuple:
+        """Execute tools sequentially (original behavior)"""
+        tool_messages = []
+        tool_results = []
+        
+        if self.debug_mode:
+            print(f"🔧 DEBUG: Executing {len(tool_calls)} tools sequentially")
+        
+        for tool_call in tool_calls:
+            result_info = self._execute_single_tool(tool_call)
+            self.tool_calls_made.append(result_info['tool_call_info'])
+            tool_messages.append(result_info['tool_message'])
+            tool_results.append(result_info['formatted_display'])
+        
+        return tool_messages, tool_results
+    
+    def _execute_tools_parallel(self, tool_calls: List[Dict[str, Any]]) -> tuple:
+        """Execute tools in parallel using ThreadPoolExecutor"""
+        tool_messages = []
+        tool_results = []
+        
+        if self.debug_mode:
+            print(f"🔧 DEBUG: Executing {len(tool_calls)} tools in parallel (max workers: {self.max_parallel_tools})")
+        
+        # Limit the number of concurrent tools
+        max_workers = min(self.max_parallel_tools, len(tool_calls))
+        
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            # Submit all tool calls
+            future_to_tool_call = {
+                executor.submit(self._execute_single_tool, tool_call): tool_call 
+                for tool_call in tool_calls
+            }
+            
+            # Collect results as they complete
+            results_with_order = []
+            for future in as_completed(future_to_tool_call):
+                tool_call = future_to_tool_call[future]
+                try:
+                    result_info = future.result()
+                    # Store original order for consistent output
+                    original_index = tool_calls.index(tool_call)
+                    results_with_order.append((original_index, result_info))
+                    
+                    if self.debug_mode:
+                        print(f"🔧 DEBUG: Completed tool {tool_call['name']}")
+                        
+                except Exception as e:
+                    if self.debug_mode:
+                        print(f"🔧 DEBUG: Parallel execution error for {tool_call.get('name', 'unknown')}: {str(e)}")
+                    
+                    # Create error result if parallel execution fails
+                    error_result = {
+                        'tool_call_info': {
+                            'tool_name': tool_call.get('name', 'unknown'),
+                            'params': tool_call.get('args', {}),
+                            'result': str(e),
+                            'success': False
+                        },
+                        'tool_message': ToolMessage(
+                            content=f"Parallel execution error: {str(e)}",
+                            tool_call_id=tool_call.get('id', '')
+                        ),
+                        'formatted_display': f"**Parallel Error**: {str(e)}"
+                    }
+                    original_index = tool_calls.index(tool_call)
+                    results_with_order.append((original_index, error_result))
+        
+        # Sort results by original order to maintain consistency
+        results_with_order.sort(key=lambda x: x[0])
+        
+        # Extract sorted results
+        for _, result_info in results_with_order:
+            self.tool_calls_made.append(result_info['tool_call_info'])
+            tool_messages.append(result_info['tool_message'])
+            tool_results.append(result_info['formatted_display'])
+        
+        return tool_messages, tool_results
     
     def _create_tool_enhanced_prompt(self, message: str, available_tools: list) -> str:
         """Create an enhanced prompt that includes available tools"""
@@ -390,7 +494,7 @@ User request: {message}"""
         # If we can't parse, return None
         return None
     
-    def _execute_forced_tool_call(self, tool_call_info: dict, original_message: str = None) -> str:
+    def _execute_forced_tool_call(self, tool_call_info: dict) -> str:
         """Execute a forced tool call and format the response"""
         tool_name = tool_call_info['tool_name']
         params = tool_call_info['params']
