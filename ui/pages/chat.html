@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Multi-Agent Chat</title>
+    <link rel="stylesheet" href="/ui/assets/css/base.css">
+    <link rel="stylesheet" href="/ui/assets/css/chat.css">
+</head>
+<body>
+    <div class="header">
+        <h1>🤖 Multi-Agent Chat</h1>
+        <div class="header-controls">
+            <select id="agentSelector" class="agent-selector">
+                <option value="">Select Agent</option>
+            </select>
+            <a href="/" class="btn btn-secondary" style="margin-right: 10px;">⚙️ Configure</a>
+            <button id="newChatBtn" class="btn btn-secondary">New Chat</button>
+        </div>
+    </div>
+
+    <div class="main-container">
+        <div class="sidebar">
+            <div class="sidebar-header">
+                <div class="sidebar-title">Agent Info</div>
+                <div id="agentInfo" class="agent-info">
+                    Select an agent to start chatting
+                </div>
+            </div>
+            <div class="conversations-list" id="conversationsList">
+                <!-- Conversations will be loaded here -->
+            </div>
+        </div>
+
+        <div class="chat-container">
+            <div class="chat-header">
+                <div id="chatTitle" class="chat-title">Select an agent to start</div>
+                <div class="chat-controls">
+                    <button id="reloadBtn" class="control-btn">🔄 Reload</button>
+                    <button id="debugBtn" class="control-btn">Debug: OFF</button>
+                    <button id="helpBtn" class="control-btn">Help</button>
+                </div>
+            </div>
+
+            <div id="messagesContainer" class="messages-container">
+                <div class="empty-state">
+                    <div class="empty-icon">💬</div>
+                    <h3>Welcome to Multi-Agent Chat</h3>
+                    <p>Select an agent from the dropdown above to start a conversation.</p>
+                    <p>Use commands like /help, /info, /debug for additional features.</p>
+                </div>
+            </div>
+
+            <div class="commands-help" id="commandsHelp">
+                <div><span class="command-name">/help</span> - Show available commands</div>
+                <div><span class="command-name">/info</span> - Show agent information</div>
+                <div><span class="command-name">/debug</span> - Toggle debug mode</div>
+                <div><span class="command-name">/tools</span> - Show tool call history</div>
+                <div><span class="command-name">/history</span> - Show conversation history</div>
+                <div><span class="command-name">/switch &lt;provider&gt; &lt;model&gt;</span> - Switch model</div>
+            </div>
+
+            <div class="input-container">
+                <div class="input-wrapper">
+                    <textarea 
+                        id="messageInput" 
+                        class="message-input" 
+                        placeholder="Type your message... (or /help for commands)"
+                        disabled
+                        rows="1"></textarea>
+                    <button id="sendBtn" class="send-btn" disabled>
+                        <span>➤</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script type="module">
+        import { ChatUI } from '/ui/assets/js/chat.js';
+        
+        document.addEventListener('DOMContentLoaded', async function() {
+            await window.chatUI.init();
+        });
+    </script>
+</body>
+</html>

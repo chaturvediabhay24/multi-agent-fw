@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Agent Configuration - Multi-Agent Framework</title>
+    <link rel="stylesheet" href="/ui/assets/css/base.css">
+    <link rel="stylesheet" href="/ui/assets/css/config.css">
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+                <div>
+                    <h1>Agent Configuration</h1>
+                    <p>Create and configure new AI agents for your multi-agent system</p>
+                </div>
+                <div style="display: flex; gap: 15px;">
+                    <a href="/chat" class="btn btn-success">💬 Chat UI</a>
+                    <button id="refreshBtn" class="btn btn-secondary">🔄 Refresh</button>
+                </div>
+            </div>
+        </div>
+
+        <div class="form-container">
+            <!-- Existing Agents Section -->
+            <div id="existingAgentsSection" style="margin-bottom: 40px;">
+                <h2 style="color: #333; margin-bottom: 20px; font-size: 1.5rem;">Existing Agents</h2>
+                <div id="existingAgentsList" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 15px; margin-bottom: 30px;">
+                    <!-- Existing agents will be loaded here -->
+                </div>
+            </div>
+
+            <!-- Agent Form -->
+            <h2 id="formTitle" style="color: #333; margin-bottom: 20px; font-size: 1.5rem;">Create New Agent</h2>
+            <form id="agentForm">
+                <div class="form-group">
+                    <label for="agentName">Agent Name *</label>
+                    <input type="text" id="agentName" name="agentName" required 
+                           placeholder="e.g., document_analyzer, code_reviewer">
+                </div>
+
+                <div class="form-group">
+                    <label for="description">Description *</label>
+                    <input type="text" id="description" name="description" required 
+                           placeholder="Brief description of what this agent does">
+                </div>
+
+                <div class="form-group">
+                    <label for="modelType">Model Type *</label>
+                    <select id="modelType" name="modelType" required>
+                        <option value="">Select Model Type</option>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label for="modelName">Model Name *</label>
+                    <select id="modelName" name="modelName" required>
+                        <option value="">Select Model</option>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <div class="system-prompt-container">
+                        <label for="systemPrompt">System Prompt *</label>
+                        <div class="system-prompt-help">
+                            <h4>💡 Tips for Writing Effective System Prompts:</h4>
+                            <ul>
+                                <li><strong>Be Specific:</strong> Clearly define the agent's role and capabilities</li>
+                                <li><strong>Include Tool Usage:</strong> Mention which tools the agent should use and when</li>
+                                <li><strong>Set Expectations:</strong> Define the expected output format and behavior</li>
+                                <li><strong>Add Context:</strong> Provide relevant background information for the domain</li>
+                            </ul>
+                            <p><strong>Example:</strong> "You are a data analyst AI. When users ask for calculations, use the calculator tool. When they need database queries, use the postgres_query tool. Always explain your findings clearly."</p>
+                        </div>
+                        <textarea id="systemPrompt" name="systemPrompt" required 
+                                  placeholder="Enter a detailed system prompt that defines the agent's behavior, capabilities, and tool usage instructions..."></textarea>
+                    </div>
+                </div>
+
+                <div class="tools-section">
+                    <div class="tools-header">
+                        <label>Available Tools</label>
+                    </div>
+                    <div class="tools-list" id="toolsList">
+                        <!-- Tools will be added here -->
+                    </div>
+                    <div class="tool-input-container">
+                        <input type="text" id="toolInput" class="tool-input" list="toolSuggestions"
+                               placeholder="Enter tool name (e.g., calculator, postgres_query)">
+                        <datalist id="toolSuggestions">
+                            <!-- Tool suggestions will be populated here -->
+                        </datalist>
+                        <button type="button" class="add-tool-btn" onclick="agentConfig.addTool()">Add Tool</button>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <div class="checkbox-group">
+                        <input type="checkbox" id="parallelTools" name="parallelTools" checked>
+                        <label for="parallelTools">Enable Parallel Tool Execution</label>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label for="maxParallelTools">Max Parallel Tools</label>
+                    <input type="number" id="maxParallelTools" name="maxParallelTools" 
+                           value="3" min="1" max="10">
+                </div>
+
+                <div class="form-group">
+                    <div class="checkbox-group">
+                        <input type="checkbox" id="debug" name="debug">
+                        <label for="debug">Enable Debug Mode</label>
+                    </div>
+                </div>
+
+                <div class="submit-container">
+                    <button type="submit" class="btn btn-primary" id="submitBtn">Create Agent</button>
+                    <button type="button" class="cancel-edit-btn" id="cancelBtn" style="display: none;">Cancel Edit</button>
+                    <div id="statusMessage" class="status-message" style="display: none;"></div>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script type="module">
+        import { AgentConfig } from '/ui/assets/js/config.js';
+        
+        document.addEventListener('DOMContentLoaded', async function() {
+            await window.agentConfig.init();
+        });
+    </script>
+</body>
+</html>
