@@ -169,6 +169,37 @@ textarea {
     font-weight: 500;
 }
 
+.agent-memory {
+    margin-bottom: 15px;
+}
+
+.agent-memory-label {
+    font-size: 0.8rem;
+    color: #666;
+    margin-bottom: 8px;
+    font-weight: 600;
+}
+
+.agent-memory-preview {
+    background: #f8f9fa;
+    color: #666;
+    padding: 10px;
+    border-radius: 6px;
+    font-size: 0.8rem;
+    line-height: 1.4;
+    font-style: italic;
+    max-height: 80px;
+    overflow: hidden;
+}
+
+.help-text {
+    display: block;
+    font-size: 0.8rem;
+    color: #666;
+    margin-top: 5px;
+    font-style: italic;
+}
+
 .agent-actions {
     display: flex;
     gap: 10px;

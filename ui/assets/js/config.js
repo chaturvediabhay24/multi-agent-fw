@@ -117,6 +117,10 @@ export class AgentConfig {
             ? agent.tools.map(tool => `<span class="agent-tool-tag">${tool}</span>`).join('')
             : '<span style="color: #666; font-style: italic;">None</span>';
 
+        const memoryPreview = agent.memory ? 
+            (agent.memory.length > 100 ? agent.memory.substring(0, 100) + '...' : agent.memory) 
+            : 'No memory stored';
+
         agentCard.innerHTML = `
             <div class="agent-card-header">
                 <div>
@@ -128,6 +132,10 @@ export class AgentConfig {
             <div class="agent-tools">
                 <div class="agent-tools-label">Tools:</div>
                 <div class="agent-tool-tags">${toolsDisplay}</div>
+            </div>
+            <div class="agent-memory">
+                <div class="agent-memory-label">Memory:</div>
+                <div class="agent-memory-preview">${Utils.escapeHtml(memoryPreview)}</div>
             </div>
             <div class="agent-actions">
                 <button class="edit-btn" onclick="agentConfig.editAgent('${agentName}')">✏️ Edit</button>
@@ -215,6 +223,7 @@ export class AgentConfig {
         document.getElementById('parallelTools').checked = agent.parallel_tools !== false;
         document.getElementById('maxParallelTools').value = agent.max_parallel_tools || 3;
         document.getElementById('debug').checked = agent.debug === true;
+        document.getElementById('memory').value = agent.memory || '';
         
         // Scroll to form
         Utils.scrollToElement(document.getElementById('agentForm'));
@@ -240,6 +249,7 @@ export class AgentConfig {
         this.tools = [];
         this.renderTools();
         document.getElementById('modelName').innerHTML = '<option value="">Select Model</option>';
+        document.getElementById('memory').value = '';
     }
 
     async deleteAgent(agentName) {
@@ -332,7 +342,8 @@ export class AgentConfig {
                 tools: this.tools,
                 parallel_tools: formData.get('parallelTools') === 'on',
                 max_parallel_tools: parseInt(formData.get('maxParallelTools')),
-                debug: formData.get('debug') === 'on'
+                debug: formData.get('debug') === 'on',
+                memory: formData.get('memory') || ''
             };
 
             // Validate required fields
@@ -363,6 +374,7 @@ export class AgentConfig {
                 this.tools = [];
                 this.renderTools();
                 document.getElementById('modelName').innerHTML = '<option value="">Select Model</option>';
+                document.getElementById('memory').value = '';
             }
 
         } catch (error) {

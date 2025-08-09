@@ -2,6 +2,7 @@ import json
 import os
 from typing import Any, Dict
 from .base_tool import BaseTool
+from pathlib import Path
 
 
 class ReadMemoryTool(BaseTool):
@@ -11,22 +12,23 @@ class ReadMemoryTool(BaseTool):
             description=f'''
             Retrieve the memory for agent {agent_name}.
 
-            This tool automatically loads the agent's memory file at the start of a conversation if it is not already loaded.
+            This tool automatically loads the agent's memory from the agent configuration.
             Use this tool to access the agent's stored memory, which contains important context and information.
             The retrieved memory should be considered as key context that the agent must remember and use when answering user queries.
             and do not metion you have this memory tool untill explicitly asked.
             '''
         )
         self.agent_name = agent_name
-        self.memory_file = f"agent_memories/{agent_name}.json"
+        self.config_path = Path(__file__).parent.parent / "config" / "agents.json"
     
     def execute(self, **kwargs) -> str:
-        """Read the agent's memory file"""
+        """Read the agent's memory from agent config"""
         try:
-            if os.path.exists(self.memory_file):
-                with open(self.memory_file, 'r') as f:
-                    memory_data = json.load(f)
-                    return memory_data.get('memory', '')
+            if self.config_path.exists():
+                with open(self.config_path, 'r') as f:
+                    config = json.load(f)
+                    agent_config = config.get(self.agent_name, {})
+                    return agent_config.get('memory', '')
             else:
                 return ""
         except Exception as e:
@@ -68,24 +70,24 @@ class AppendMemoryTool(BaseTool):
             '''
         )
         self.agent_name = agent_name
-        self.memory_file = f"agent_memories/{agent_name}.json"
+        self.config_path = Path(__file__).parent.parent / "config" / "agents.json"
     
     def execute(self, text: str = "", **kwargs) -> str:
-        """Append text to the agent's memory file"""
+        """Append text to the agent's memory in agent config"""
         try:
             # Check if text is actually provided and not empty
             if not text or text.strip() == "":
                 return "Error: No text provided to append to memory. Please provide text to store."
             
-            # Ensure the directory exists
-            os.makedirs("agent_memories", exist_ok=True)
+            # Read existing config
+            config = {}
+            if self.config_path.exists():
+                with open(self.config_path, 'r') as f:
+                    config = json.load(f)
             
-            # Read existing memory
-            existing_memory = ""
-            if os.path.exists(self.memory_file):
-                with open(self.memory_file, 'r') as f:
-                    memory_data = json.load(f)
-                    existing_memory = memory_data.get('memory', '')
+            # Get existing memory for this agent
+            agent_config = config.get(self.agent_name, {})
+            existing_memory = agent_config.get('memory', '')
             
             # Append new text with timestamp
             from datetime import datetime
@@ -99,15 +101,17 @@ class AppendMemoryTool(BaseTool):
             
             updated_memory = existing_memory + new_entry
             
-            # Save updated memory
-            memory_data = {
-                'agent_name': self.agent_name,
-                'memory': updated_memory,
-                'last_updated': timestamp
-            }
+            # Update agent config with new memory
+            if self.agent_name not in config:
+                config[self.agent_name] = {}
+            config[self.agent_name]['memory'] = updated_memory
             
-            with open(self.memory_file, 'w') as f:
-                json.dump(memory_data, f, indent=2)
+            # Ensure config directory exists
+            self.config_path.parent.mkdir(exist_ok=True)
+            
+            # Save updated config
+            with open(self.config_path, 'w') as f:
+                json.dump(config, f, indent=2)
             
             return f"Memory updated successfully. Added: {text.strip()}"
             

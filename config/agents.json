@@ -11,7 +11,8 @@
       "append_memory"
     ],
     "parallel_tools": true,
-    "max_parallel_tools": 3
+    "max_parallel_tools": 3,
+    "memory": "[2025-08-09 20:24:01] Key database insights:\n1. The database contains an 'account' table that stores user registration data\n2. The 'account' table has a 'create_time' column that tracks when users signed up\n3. The database appears to be using timestamps in UTC format\n4. When querying for time-based data like signups by month, I need to use date_trunc('month', create_time) for proper aggregation\n5. The database contains recent data from 2025 (July and August)\n6. For monthly comparisons, I should use extract(year from create_time) and extract(month from create_time) or date_trunc functions\n7. The account table likely contains user registration information that can be used for tracking signups and user growth metrics\n8. The database uses PostgreSQL syntax for queries\n\n[2025-08-09 20:42:13] Database Schema Knowledge:\n\n1. First-time deposits tracking:\n   - Table: bonus\n   - Key columns: bonus_type='JOINING_BONUS', award_date (for time filtering)\n   - JOINING_BONUS is specifically awarded on a user's first deposit\n\n2. Transaction-related tables:\n   - banking_transaction: Has 'deposit' boolean column for deposit transactions\n   - wallet_transaction: Tracks wallet transactions\n   - deposit_turnover: Tracks deposit amounts and turnover requirements\n\n3. Bonus system structure:\n   - bonus_policy: Defines reusable configurations for bonuses with settings like eligibility, turnover conditions\n   - bonus: Stores individual bonus instances awarded to users\n   - Relationship: bonus.bonus_policy_id → bonus_policy.id (Foreign Key)\n   \n4. Bonus types (bonus_type column):\n   - JOINING_BONUS: First deposit bonus\n   - DEPOSIT_BONUS: For any deposit (not just first)\n   - SIGNUP_BONUS: For registration\n   - LOSSBACK_BONUS: Covers portion of losses\n   - REFERRAL_BONUS: For referring new users\n   - SPECIAL_BONUS: For campaigns based on turnover, events, etc.\n\n5. Bonus statuses (bonus_status column):\n   - AWARDED: Granted but not redeemed\n   - PARTIALLY_REDEEMED: Partially redeemed\n   - REDEEMED: Fully redeemed to main wallet\n   - EXPIRED: Validity expired before full redemption\n   - AWARD_IN_PROGRESS: In process of being awarded\n   - CANCELLED: Cancelled before activation\n   - VOIDED: Invalidated due to fraud/violation\n\n6. Turnover tracking in bonus table:\n   - turnover_snapshot: User's turnover at bonus award time\n   - turnover_required: Required turnover to redeem\n   - turnover_met: Turnover achieved so far"
   },
   "askdb-pro": {
     "class": "CustomAgent",
@@ -25,6 +26,7 @@
       "append_memory"
     ],
     "parallel_tools": true,
-    "max_parallel_tools": 3
+    "max_parallel_tools": 4,
+    "memory": ""
   }
 }

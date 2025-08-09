@@ -32,6 +32,7 @@ class AgentConfig(BaseModel):
     parallel_tools: bool = True
     max_parallel_tools: int = 3
     debug: bool = False
+    memory: str = ""
 
 class CreateAgentRequest(BaseModel):
     agent_name: str
@@ -183,7 +184,8 @@ async def create_agent(request: CreateAgentRequest, auth: bool = Depends(require
         "system_prompt": request.config.system_prompt,
         "tools": request.config.tools,
         "parallel_tools": request.config.parallel_tools,
-        "max_parallel_tools": request.config.max_parallel_tools
+        "max_parallel_tools": request.config.max_parallel_tools,
+        "memory": request.config.memory
     }
     
     # Add debug field only if it's True
@@ -221,7 +223,8 @@ async def update_agent(agent_name: str, config: AgentConfig, auth: bool = Depend
         "system_prompt": config.system_prompt,
         "tools": config.tools,
         "parallel_tools": config.parallel_tools,
-        "max_parallel_tools": config.max_parallel_tools
+        "max_parallel_tools": config.max_parallel_tools,
+        "memory": config.memory
     }
     
     # Add debug field only if it's True
