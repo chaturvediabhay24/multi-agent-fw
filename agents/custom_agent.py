@@ -18,10 +18,10 @@ class CustomAgent(BaseAgent):
         self._last_had_tool_calls = False  # Track tool call usage for fallback logic
         self._conversation_managed_by_provider = False  # Track if provider managed conversation history
         
-        # Load agent-specific tools
+        # Load agent-specific tools (including memory tools automatically)
         agent_tools = self.get_available_tools()
         if agent_tools:
-            self.tool_registry.load_tools_for_agent(agent_tools)
+            self.tool_registry.load_tools_for_agent(agent_tools, self.name)
         
     def get_description(self) -> str:
         """Return a description of what this agent does"""

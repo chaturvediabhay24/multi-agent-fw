@@ -37,8 +37,16 @@ class LangChainToolAdapter:
     @staticmethod
     def _create_pydantic_model_from_schema(schema: Dict[str, Any], model_name: str) -> Type[BaseModel]:
         """Create a Pydantic model from a JSON schema"""
-        properties = schema.get('properties', {})
-        required = schema.get('required', [])
+        # Handle both direct schema format and function wrapper format
+        if 'function' in schema and 'parameters' in schema['function']:
+            # Function wrapper format (like OpenAI function calling)
+            params = schema['function']['parameters']
+            properties = params.get('properties', {})
+            required = params.get('required', [])
+        else:
+            # Direct schema format
+            properties = schema.get('properties', {})
+            required = schema.get('required', [])
         
         fields = {}
         

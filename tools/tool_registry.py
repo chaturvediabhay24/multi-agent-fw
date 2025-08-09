@@ -55,11 +55,22 @@ class ToolRegistry:
         
         return tool.execute(**kwargs)
     
-    def load_tools_for_agent(self, tool_names: List[str]):
-        """Load specific tools for an agent, including dynamic agent proxy tools"""
+    def load_tools_for_agent(self, tool_names: List[str], agent_name: str = None):
+        """Load specific tools for an agent, including dynamic agent proxy tools and memory tools"""
         for tool_name in tool_names:
             if tool_name not in self._tools:
-                if tool_name in self._available_tools:
+                # Handle memory tools specially (they need agent_name)
+                if tool_name in ['read_memory', 'append_memory'] and agent_name:
+                    try:
+                        from tools.memory_tools import ReadMemoryTool, AppendMemoryTool
+                        if tool_name == 'read_memory':
+                            tool_instance = ReadMemoryTool(agent_name)
+                        else:  # append_memory
+                            tool_instance = AppendMemoryTool(agent_name)
+                        self.register_tool(tool_name, tool_instance)
+                    except Exception as e:
+                        print(f"Warning: Failed to load memory tool '{tool_name}': {e}")
+                elif tool_name in self._available_tools:
                     # Load regular tool
                     try:
                         tool_class = self._available_tools[tool_name]
