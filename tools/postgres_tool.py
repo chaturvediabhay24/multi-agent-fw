@@ -10,7 +10,19 @@ class PostgresTool(BaseTool):
     def __init__(self):
         super().__init__(
             name="postgres_query",
-            description="Execute PostgreSQL queries and return results"
+            description='''Execute PostgreSQL queries and return results
+            If you dont have understanding of which table to access to answer the question. 
+            Then you are allowed to do subset of these steps based on the requirement.
+
+            1. Get list of all tables in the database
+            2. Get the columns of a specific table
+            3. Get schema information for a specific table
+            4. Execute read-only queries (e.g., SELECT, AGG) on specific tables. 
+            Keping in mind that you dont query db results in uncontrollable way 
+            as these data can be high and exceed your context length.
+            Untill explicitly prompted to get values that too in paginated way.
+            '''
+            
         )
         self.connection_params = {
             'host': os.getenv('POSTGRES_HOST', 'localhost'),
