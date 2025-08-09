@@ -10,7 +10,7 @@ from .base_provider import BaseModelProvider
 class ClaudeProvider(BaseModelProvider):
     """Claude (Anthropic) model provider"""
     
-    def __init__(self, model_name: str = "claude-3-sonnet-20240229", **kwargs):
+    def __init__(self, model_name: str = "claude-3-5-sonnet-20241022", **kwargs):
         super().__init__(model_name, **kwargs)
         self.client = None
         self._initialize_client()

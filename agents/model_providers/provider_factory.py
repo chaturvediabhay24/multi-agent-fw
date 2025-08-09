@@ -2,6 +2,7 @@ from typing import Dict, Type
 from .base_provider import BaseModelProvider
 from .openai_provider import OpenAIProvider
 from .claude_provider import ClaudeProvider
+from .bedrock_bearer_provider import BedrockBearerProvider
 
 
 class ModelProviderFactory:
@@ -10,6 +11,7 @@ class ModelProviderFactory:
     _providers: Dict[str, Type[BaseModelProvider]] = {
         'openai': OpenAIProvider,
         'claude': ClaudeProvider,
+        'bedrock': BedrockBearerProvider,
     }
     
     @classmethod
