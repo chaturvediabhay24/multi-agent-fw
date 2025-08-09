@@ -13,8 +13,8 @@ class BedrockBearerProvider(BaseModelProvider):
     
     def __init__(self, model_name: str = "anthropic.claude-3-sonnet-20240229-v1:0", **kwargs):
         super().__init__(model_name, **kwargs)
-        # Use us-east-1 since that's where the models are available
-        self.endpoint = "https://bedrock-runtime.eu-west-2.amazonaws.com/model/{}/invoke".format(model_name)
+        self.region = os.getenv('AWS_BEDROCK_REGION', 'eu-west-2')
+        self.endpoint = f"https://bedrock-runtime.{self.region}.amazonaws.com/model/{model_name}/invoke"
         self.bearer_token = os.getenv('AWS_BEARER_TOKEN_BEDROCK')
         
     def _format_messages_for_bedrock(self, messages: List[BaseMessage]) -> dict:
@@ -107,11 +107,13 @@ class BedrockBearerProvider(BaseModelProvider):
         """Check if AWS Bedrock bearer token is available"""
         return bool(os.getenv('AWS_BEARER_TOKEN_BEDROCK'))
     
-    async def list_available_models(self, region: str = "us-east-1") -> Dict[str, Any]:
+    async def list_available_models(self, region: str = None) -> Dict[str, Any]:
         """List all available foundation models in the specified AWS region"""
         if not self.is_available():
             raise RuntimeError("Bedrock bearer token not available.")
         
+        # Use provided region or fall back to instance region
+        region = region or self.region
         list_endpoint = f"https://bedrock.{region}.amazonaws.com/foundation-models"
         
         headers = {
@@ -166,11 +168,13 @@ class BedrockBearerProvider(BaseModelProvider):
         except json.JSONDecodeError as e:
             raise RuntimeError(f"Failed to parse response JSON: {e}")
     
-    async def test_model_access(self, model_ids: List[str], region: str = "us-east-1") -> Dict[str, str]:
+    async def test_model_access(self, model_ids: List[str], region: str = None) -> Dict[str, str]:
         """Test access to specific model IDs"""
         if not self.is_available():
             raise RuntimeError("Bedrock bearer token not available.")
         
+        # Use provided region or fall back to instance region
+        region = region or self.region
         results = {}
         
         headers = {
