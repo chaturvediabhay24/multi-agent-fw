@@ -53,14 +53,14 @@ class BaseAgent(ABC):
         
     async def ainvoke(self, message: str, save_conversation: bool = True) -> str:
         """Async main method to invoke the agent with a message"""
-        # Add user message to history
-        user_message = HumanMessage(content=message)
-        self.conversation_history.append(user_message)
-        
         # Get system prompt if defined
         system_prompt = self.config.get('system_prompt', '')
         if system_prompt and not any(isinstance(msg, SystemMessage) for msg in self.conversation_history):
             self.add_system_message(system_prompt)
+        
+        # Add user message to history
+        user_message = HumanMessage(content=message)
+        self.conversation_history.append(user_message)
         
         # Process the message (can be overridden by subclasses)
         response = await self._aprocess_message(message)

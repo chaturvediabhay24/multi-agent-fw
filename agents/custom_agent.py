@@ -4,7 +4,7 @@ from typing import Dict, Any, List
 from agents.base_agent import BaseAgent
 from tools.tool_registry import ToolRegistry
 from tools.langchain_tool_adapter import LangChainToolAdapter
-from langchain_core.messages import ToolMessage, AIMessage
+from langchain_core.messages import ToolMessage, AIMessage, HumanMessage, SystemMessage
 
 
 class CustomAgent(BaseAgent):
@@ -16,6 +16,7 @@ class CustomAgent(BaseAgent):
         self.parallel_execution = config.get('parallel_tools', True)  # Enable parallel execution by default
         self.max_parallel_tools = config.get('max_parallel_tools', 2)  # Limit concurrent tools
         self._last_had_tool_calls = False  # Track tool call usage for fallback logic
+        self._conversation_managed_by_provider = False  # Track if provider managed conversation history
         
         # Load agent-specific tools
         agent_tools = self.get_available_tools()
@@ -30,6 +31,7 @@ class CustomAgent(BaseAgent):
         """Async process message with structured tool calling"""
         available_tools = self.get_available_tools()
         self.tool_calls_made = []  # Reset tool calls for this message
+        self._conversation_managed_by_provider = False  # Reset flag
         
         if self.debug_mode:
             print(f"🔧 DEBUG: Available tools: {available_tools}")
@@ -38,14 +40,6 @@ class CustomAgent(BaseAgent):
         if available_tools and self.model_provider.supports_tool_calling():
             # Try structured calling first to enable parallel execution
             structured_result = await self._aprocess_with_structured_tools(message, available_tools)
-            
-            # If structured calling didn't produce tool calls, fall back to forced detection
-            if not hasattr(self, '_last_had_tool_calls') or not self._last_had_tool_calls:
-                forced_tool_call = self._detect_forced_tool_usage(message, available_tools)
-                if forced_tool_call:
-                    if self.debug_mode:
-                        print(f"🔧 DEBUG: Falling back to forced tool call: {forced_tool_call}")
-                    return await self._aexecute_forced_tool_call(forced_tool_call)
             
             return structured_result
         else:
@@ -84,12 +78,29 @@ class CustomAgent(BaseAgent):
             print(f"🔧 DEBUG: Model response type: {type(response)}")
         
         # Handle structured response
-        if isinstance(response, dict) and 'tool_calls' in response:
-            return await self._ahandle_structured_tool_calls(response)
-        else:
-            # No tool calls, return regular response
-            self._last_had_tool_calls = False
-            return str(response)
+        if isinstance(response, dict):
+            if 'tool_calls' in response:
+                return await self._ahandle_structured_tool_calls(response)
+            elif 'messages' in response:
+                # Handle BedrockBearerProvider response with conversation history
+                updated_messages = response['messages']
+                content = response.get('content', '')
+                
+                # Update conversation history with the messages from provider
+                # Remove current messages and replace with updated ones from provider
+                original_count = len(self.conversation_history)
+                self.conversation_history = updated_messages
+                
+                if self.debug_mode:
+                    print(f"🔧 DEBUG: Updated conversation history from {original_count} to {len(self.conversation_history)} messages")
+                
+                # Signal that conversation history is already managed
+                self._conversation_managed_by_provider = True
+                return content
+        
+        # No tool calls, return regular response
+        self._last_had_tool_calls = False
+        return str(response)
     
     def _process_with_structured_tools(self, message: str, available_tool_names: List[str]) -> str:
         """Synchronous process with structured tools (for backward compatibility)"""
@@ -409,54 +420,6 @@ User request: {message}"""
         
         return params
     
-    def _detect_forced_tool_usage(self, message: str, available_tools: list) -> dict:
-        """Detect if we should force tool usage based on message content"""
-        message_lower = message.lower()
-        
-        # Check for calculator tool usage
-        if 'calculator' in available_tools:
-            # Look for calculation keywords
-            calc_keywords = ['calculate', 'compute', 'what is', 'what\'s', '*', '+', '-', '/', '^', 'sqrt', 'sin', 'cos', 'tan', '%']
-            if any(keyword in message_lower for keyword in calc_keywords):
-                # Try to extract mathematical expression
-                # Simple patterns for common calculations
-                import re
-                
-                # Pattern for "calculate X * Y" or "what is X + Y"
-                calc_patterns = [
-                    r'calculate\s+(.+)',
-                    r'compute\s+(.+)', 
-                    r'what\s+is\s+(.+)',
-                    r'what\'s\s+(.+)',
-                    r'execute\s+calculater?\s+to\s+find\s+(.+)',  # Handle "execute calculator to find"
-                    r'find\s+(.+)',  # Handle "find X * Y"
-                    r'^(.+)$'  # Fallback - treat entire message as expression if it contains math operators
-                ]
-                
-                for pattern in calc_patterns:
-                    match = re.search(pattern, message_lower)
-                    if match:
-                        expression = match.group(1).strip()
-                        # Clean up the expression
-                        expression = expression.replace('?', '').strip()
-                        if any(op in expression for op in ['*', '+', '-', '/', '^', '(', ')', 'sqrt', 'sin', 'cos']):
-                            # Parse the expression into param1, param2, operator
-                            parsed_params = self._parse_math_expression(expression)
-                            if parsed_params:
-                                if self.debug_mode:
-                                    print(f"🔧 DEBUG: Parsed expression '{expression}' -> {parsed_params}")
-                                return {
-                                    'tool_name': 'calculator',
-                                    'params': parsed_params,
-                                    'original_message': message
-                                }
-                            else:
-                                if self.debug_mode:
-                                    print(f"🔧 DEBUG: Failed to parse expression: '{expression}'")
-                                return None
-        
-        return None
-    
     def _parse_math_expression(self, expression: str) -> dict:
         """Parse a mathematical expression into param1, param2, operator format"""
         import re
@@ -590,3 +553,36 @@ User request: {message}"""
             'conversation_length': len(self.conversation_history),
             'debug_mode': self.debug_mode
         }
+    
+    async def ainvoke(self, message: str, save_conversation: bool = True) -> str:
+        """Override base ainvoke to handle provider-managed conversation history"""
+        # Get system prompt if defined
+        system_prompt = self.config.get('system_prompt', '')
+        if system_prompt and not any(isinstance(msg, SystemMessage) for msg in self.conversation_history):
+            self.add_system_message(system_prompt)
+        
+        # Add user message to history
+        user_message = HumanMessage(content=message)
+        self.conversation_history.append(user_message)
+        
+        # Process the message
+        response = await self._aprocess_message(message)
+        
+        # Only add AI response if provider didn't manage conversation history
+        if not self._conversation_managed_by_provider:
+            ai_message = AIMessage(content=response)
+            self.conversation_history.append(ai_message)
+        
+        # Save conversation if requested
+        if save_conversation:
+            self.conversation_manager.save_conversation(
+                self.conversation_id,
+                self.conversation_history,
+                metadata={
+                    'agent_name': self.name,
+                    'model_type': self.config.get('model_type'),
+                    'model_name': self.config.get('model_name')
+                }
+            )
+        
+        return response
