@@ -4,7 +4,7 @@ API Router for Multi-Agent Framework
 This module contains all the API endpoints for agent management, configuration, and chat functionality.
 """
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request, Depends
 from pydantic import BaseModel
 from typing import List, Optional, Dict, Any
 import json
@@ -56,6 +56,26 @@ PROVIDERS_CONFIG_PATH = Path(__file__).parent.parent / "config" / "model_provide
 # Global registry for chat functionality
 registry = AgentRegistry()
 conversation_manager = ConversationManager()
+
+# Import authentication functions
+from auth import is_session_valid
+
+def is_authenticated(request: Request):
+    """Check if user is authenticated"""
+    session_id = request.headers.get("x-session-id") or request.cookies.get("session-id")
+    print(f"DEBUG API: Headers received: {dict(request.headers)}")
+    print(f"DEBUG API: Session ID from headers: {request.headers.get('x-session-id')}")
+    print(f"DEBUG API: Session ID from cookies: {request.cookies.get('session-id')}")
+    print(f"DEBUG API: Final session ID: {session_id}")
+    result = session_id and is_session_valid(session_id)
+    print(f"DEBUG API: Authentication result: {result}")
+    return result
+
+def require_auth(request: Request):
+    """Dependency to require authentication for config operations"""
+    if not is_authenticated(request):
+        raise HTTPException(status_code=401, detail="Authentication required")
+    return True
 
 def load_agents_config():
     """Load existing agents configuration"""
@@ -126,8 +146,19 @@ async def get_agents():
     config = load_agents_config()
     return {"agents": config}
 
+@router.get("/agents/{agent_name}")
+async def get_agent(agent_name: str):
+    """Get a specific agent configuration"""
+    config = load_agents_config()
+    
+    # Check if agent exists
+    if agent_name not in config:
+        raise HTTPException(status_code=404, detail=f"Agent '{agent_name}' not found")
+    
+    return {"agent": {agent_name: config[agent_name]}}
+
 @router.post("/agents")
-async def create_agent(request: CreateAgentRequest):
+async def create_agent(request: CreateAgentRequest, auth: bool = Depends(require_auth)):
     """Create a new agent and add it to the configuration"""
     
     # Validate agent name
@@ -171,7 +202,7 @@ async def create_agent(request: CreateAgentRequest):
     }
 
 @router.put("/agents/{agent_name}")
-async def update_agent(agent_name: str, config: AgentConfig):
+async def update_agent(agent_name: str, config: AgentConfig, auth: bool = Depends(require_auth)):
     """Update an existing agent configuration"""
     
     # Load existing configuration
@@ -208,7 +239,7 @@ async def update_agent(agent_name: str, config: AgentConfig):
     }
 
 @router.delete("/agents/{agent_name}")
-async def delete_agent(agent_name: str):
+async def delete_agent(agent_name: str, auth: bool = Depends(require_auth)):
     """Delete an agent from the configuration"""
     
     # Load existing configuration

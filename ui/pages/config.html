@@ -128,6 +128,24 @@
         import { AgentConfig } from '/ui/assets/js/config.js';
         
         document.addEventListener('DOMContentLoaded', async function() {
+            // Check if session ID is in URL and store it in localStorage
+            const urlParams = new URLSearchParams(window.location.search);
+            const sessionIdFromUrl = urlParams.get('session_id');
+            console.log('DEBUG CONFIG: Session ID from URL:', sessionIdFromUrl);
+            if (sessionIdFromUrl) {
+                localStorage.setItem('session-id', sessionIdFromUrl);
+                // Also store in a global variable as backup
+                window.currentSessionId = sessionIdFromUrl;
+                console.log('DEBUG CONFIG: Stored session ID in localStorage and global var');
+                // Clean up URL by removing session_id parameter
+                const newUrl = window.location.pathname;
+                window.history.replaceState({}, document.title, newUrl);
+            }
+            
+            const currentSessionId = localStorage.getItem('session-id');
+            console.log('DEBUG CONFIG: Current session ID in localStorage:', currentSessionId);
+            console.log('DEBUG CONFIG: Global session ID:', window.currentSessionId);
+            
             await window.agentConfig.init();
         });
     </script>
