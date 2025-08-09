@@ -17,7 +17,7 @@ def get_config_pin() -> str:
 
 def create_session() -> str:
     """Create a new authenticated session"""
-    session_id = secrets.token_urlsafe(32)
+    session_id = f"auth_{secrets.token_urlsafe(32)}"
     authenticated_sessions.add(session_id)
     return session_id
 

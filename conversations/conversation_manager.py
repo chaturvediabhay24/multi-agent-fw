@@ -55,6 +55,9 @@ class ConversationManager:
             
             conversation_data['messages'].append(msg_data)
         
+        # Ensure the sessions directory exists before saving
+        os.makedirs(self.sessions_dir, exist_ok=True)
+        
         # Save to sessions folder with organized structure
         file_path = os.path.join(self.sessions_dir, f"{conversation_id}.json")
         with open(file_path, 'w') as f:

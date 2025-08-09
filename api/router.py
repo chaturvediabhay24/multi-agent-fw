@@ -297,8 +297,8 @@ async def chat_with_agent(message: ChatMessage):
                 detail=f"Agent '{message.agent_name}' not found. Available agents: {available_agents}"
             )
         
-        # Set conversation ID if provided
-        if message.conversation_id:
+        # Set conversation ID if provided and it's not an auth session
+        if message.conversation_id and not message.conversation_id.startswith('auth_'):
             agent.conversation_id = message.conversation_id
             # Load existing conversation history
             try:
@@ -306,6 +306,11 @@ async def chat_with_agent(message: ChatMessage):
             except Exception as e:
                 print(f"Could not load conversation {message.conversation_id}: {e}")
                 pass  # If conversation doesn't exist, start fresh
+        else:
+            # Generate a new conversation ID for new conversations
+            import uuid
+            agent.conversation_id = f"conv_{uuid.uuid4().hex[:8]}_{message.agent_name}"
+            agent.conversation_history = []
         
         # Set debug mode if requested
         if hasattr(agent, 'debug_mode'):
@@ -356,8 +361,8 @@ async def switch_agent_model(request: SwitchModelRequest):
                 detail=f"Agent '{request.agent_name}' not found. Available agents: {available_agents}"
             )
         
-        # Set conversation ID if provided
-        if request.conversation_id:
+        # Set conversation ID if provided and it's not an auth session
+        if request.conversation_id and not request.conversation_id.startswith('auth_'):
             agent.conversation_id = request.conversation_id
         
         # Switch model
