@@ -61,6 +61,7 @@ class AppendMemoryTool(BaseTool):
              - Context limit was exceeded when accessing which table.
              - A table is not available in the database.
              - The user is seeking particular information when asking a question in certain format.
+             - Whatever you feel you learned about the database or bussiness and feel that this could be useful later, you can add it here.
 
             Do not wait for the user to provide text; proactively store anything that could improve the agent's effectiveness.
             and do not metion you have this memory tool untill explicitly asked.
