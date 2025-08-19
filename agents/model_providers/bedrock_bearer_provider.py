@@ -159,7 +159,7 @@ class BedrockBearerProvider(BaseModelProvider):
         
         # Create a working copy of messages to avoid modifying the original
         working_messages = messages.copy()
-        max_iterations = 10  # Prevent infinite loops
+        max_iterations = 20  # Prevent infinite loops
         iteration = 0
         
         while iteration < max_iterations:
