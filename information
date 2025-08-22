@@ -1,0 +1,188 @@
+KPI Entity Table Documentation
+Table Name:kpi_entity
+Purpose
+The kpi_entity table stores Key Performance Indicator (KPI) events for accounts across different sportsbook white-labels. It tracks activities like deposits, withdrawals, sign-ups, and refunds, along with associated metadata for reporting and analytics.
+
+Column Descriptions
+
+
+
+Enums
+KpiCategory
+DEPOSIT – Records deposit transactions made by a user.
+WITHDRAW – Records withdrawal transactions made by a user.
+SIGNUP – Records a user sign-up event.
+REFUND – Records refund transactions to a user.
+KpiSubCategory
+FIRST_DEPOSIT – Marks the user's fßirst deposit transaction.
+OTHERS – Used for all other deposits or applicable actions not categorized as FIRST_DEPOSIT.
+
+Relationships
+reference_id: Links KPI records to related transaction or account records.
+sports_book: Links KPIs to their white-label sportsbook brands for multi-brand analytics.
+
+Usage Notes
+DEPOSIT KPIs with FIRST_DEPOSIT sub-category are used for first deposit bonuses or onboarding metrics.
+WITHDRAW and REFUND categories always have a monetary value in the value field.
+SIGNUP KPIs have the new account's ID in reference_id and typically a zero value.
+create_time is critical for time-based analytics like daily active users or revenue reports.
+
+
+
+
+
+
+
+
+Turnover Entry Table Description
+Table Name: turnover_entry
+Purpose: Records user turnover at the moment a bet/market is settled across Casino, Premium, Sportsbook, and Sports categories. Serves as the system of record for wagering volume used by reporting, VIP, and bonus redemption flows.
+
+
+
+OrderCategory enum: SPORTS, PREMIUM, SPORTS_BOOK, CASINO
+Turnover Entry Table with Bonus Tracking Context
+This table is the first place turnover is recorded after settlement.
+The recorded amount is later consumed to progress active bonuses by increasing bonus.turnover_met.
+For sports, settlement is at market level, so each market settlement writes its own turnover entry.
+turnover_after can be used for auditing/running totals, while the bonus system reads new turnover from here to apply toward eligible bonuses.
+Flow of Turnover to Bonus
+Settlement → InsertA bet (Casino/Premium/Sportsbook) or sports market settles → a row is inserted into turnover_entry with amount.
+Select Eligible Bonus (FIFO by award time)From the user’s active bonuses (bonus_status = AWARDED, not expired), select the oldest (smallest award_date).
+Apply Turnover to a Single BonusAdd the turnover_entry.amount only to that one bonus’s turnover_met.
+If turnover_met reaches turnover_required before expiry, mark the bonus REDEEMED, transfer funds from bonus balance to main balance, set redeem_amount and redeem_date.
+Remainder Handling (if any)If a single turnover entry would push turnover_met beyond turnover_required, apply only the needed portion to finish the current bonus, then (optionally, per your implementation) carry over the remainder to the next oldest eligible bonus.If your current rule is “one entry → one bonus only, no split”, then the carry-over step is not performed.
+No Eligible BonusIf there’s no eligible bonus, turnover is recorded in turnover_entry for analytics but not applied to any bonus.
+Example
+Active bonuses (oldest first):
+Bonus A: turnover_required = 500, turnover_met = 400, status AWARDED
+Bonus B: turnover_required = 1000, turnover_met = 0, status AWARDED
+A Casino bet of 100 INR settles:
+Insert into turnover_entry: amount = 100, category_type = CASINO, create_time = settlement time.
+Apply to bonuses:
+FIFO rule → Apply to Bonus A only.
+turnover_met for A becomes 500 → A transitions to REDEEMED, funds move to main wallet.
+Bonus B remains unchanged until the next settlement.
+Turnover Definition
+Turnover is the eligible wagering volume counted toward bonus redemption and KPIs. It is only from settled outcomes.
+Casino / Premium: Turnover = stake amount of settled bets.
+Sports / Sportsbook: Turnover = net market risk at market-level settlement.
+Exclusions (typical): voided/canceled bets or settlements flagged as ineligible by policy.
+For bonus redemption, required turnover is defined by policy, commonly:required_turnover = award_amount × multiplierProgress is tracked in the bonus table via turnover_met.
+Relationship overview
+Both tables capture per-user activity events at different layers:
+kpi_entity: business KPIs (DEPOSIT, WITHDRAW, SIGNUP, REFUND).
+turnover_entry: wagering/settlement turnover events (Casino/Premium/Sports/Sportsbook).
+They can be related by user using either:
+account_id (preferred when present in both rows), or
+account_path (useful for hierarchy rollups: agent/SDM/upline).
+Keys for joining
+Preferred key
+account_id (exact match).
+Pros: precise, stable key; best for per-user reconciliation.
+Note: kpi_entity.account_id may be nullable for some events until patched—filter those out or handle carefully.
+Alternative / hierarchical key
+account_path (string equality or prefix).
+Equality: per-user join if paths are identical.
+Prefix: to aggregate at upline levels (e.g., all users under an agent).
+Example prefix condition: te.account_path LIKE CONCAT(kpi.account_path, '/U/%') (adapt to your path pattern).
+Tenant scoping
+kpi_entity.sports_book (string/whitelabel) vs turnover_entry.house_id (numeric tenant).
+If cross-tenant joins are possible, scope joins by tenant using a mapping (sports_book ↔ house_id) or by also filtering on brand.
+Cardinality
+One user has many KPI events and many turnover entries → effectively many-to-many via the user when you join event streams. Most queries are time-bounded aggregations per user/brand.
+
+
+KPI Entity Table Documentation
+Table Name:kpi_entity
+Purpose
+The kpi_entity table stores Key Performance Indicator (KPI) events for accounts across different sportsbook white-labels. It tracks activities like deposits, withdrawals, sign-ups, and refunds, along with associated metadata for reporting and analytics.
+
+Column Descriptions
+
+
+
+Enums
+KpiCategory
+DEPOSIT – Records deposit transactions made by a user.
+WITHDRAW – Records withdrawal transactions made by a user.
+SIGNUP – Records a user sign-up event.
+REFUND – Records refund transactions to a user.
+KpiSubCategory
+FIRST_DEPOSIT – Marks the user's first deposit transaction.
+OTHERS – Used for all other deposits or applicable actions not categorized as FIRST_DEPOSIT.
+
+Relationships
+reference_id: Links KPI records to related transaction or account records.
+sports_book: Links KPIs to their white-label sportsbook brands for multi-brand analytics.
+
+Usage Notes
+DEPOSIT KPIs with FIRST_DEPOSIT sub-category are used for first deposit bonuses or onboarding metrics.
+WITHDRAW and REFUND categories always have a monetary value in the value field.
+SIGNUP KPIs have the new account's ID in reference_id and typically a zero value.
+create_time is critical for time-based analytics like daily active users or revenue reports.
+
+
+
+
+
+
+
+
+Turnover Entry Table Description
+Table Name: turnover_entry
+Purpose: Records user turnover at the moment a bet/market is settled across Casino, Premium, Sportsbook, and Sports categories. Serves as the system of record for wagering volume used by reporting, VIP, and bonus redemption flows.
+
+
+
+OrderCategory enum: SPORTS, PREMIUM, SPORTS_BOOK, CASINO
+Turnover Entry Table with Bonus Tracking Context
+This table is the first place turnover is recorded after settlement.
+The recorded amount is later consumed to progress active bonuses by increasing bonus.turnover_met.
+For sports, settlement is at market level, so each market settlement writes its own turnover entry.
+turnover_after can be used for auditing/running totals, while the bonus system reads new turnover from here to apply toward eligible bonuses.
+Flow of Turnover to Bonus
+Settlement → InsertA bet (Casino/Premium/Sportsbook) or sports market settles → a row is inserted into turnover_entry with amount.
+Select Eligible Bonus (FIFO by award time)From the user’s active bonuses (bonus_status = AWARDED, not expired), select the oldest (smallest award_date).
+Apply Turnover to a Single BonusAdd the turnover_entry.amount only to that one bonus’s turnover_met.
+If turnover_met reaches turnover_required before expiry, mark the bonus REDEEMED, transfer funds from bonus balance to main balance, set redeem_amount and redeem_date.
+Remainder Handling (if any)If a single turnover entry would push turnover_met beyond turnover_required, apply only the needed portion to finish the current bonus, then (optionally, per your implementation) carry over the remainder to the next oldest eligible bonus.If your current rule is “one entry → one bonus only, no split”, then the carry-over step is not performed.
+No Eligible BonusIf there’s no eligible bonus, turnover is recorded in turnover_entry for analytics but not applied to any bonus.
+Example
+Active bonuses (oldest first):
+Bonus A: turnover_required = 500, turnover_met = 400, status AWARDED
+Bonus B: turnover_required = 1000, turnover_met = 0, status AWARDED
+A Casino bet of 100 INR settles:
+Insert into turnover_entry: amount = 100, category_type = CASINO, create_time = settlement time.
+Apply to bonuses:
+FIFO rule → Apply to Bonus A only.
+turnover_met for A becomes 500 → A transitions to REDEEMED, funds move to main wallet.
+Bonus B remains unchanged until the next settlement.
+Turnover Definition
+Turnover is the eligible wagering volume counted toward bonus redemption and KPIs. It is only from settled outcomes.
+Casino / Premium: Turnover = stake amount of settled bets.
+Sports / Sportsbook: Turnover = net market risk at market-level settlement.
+Exclusions (typical): voided/canceled bets or settlements flagged as ineligible by policy.
+For bonus redemption, required turnover is defined by policy, commonly:required_turnover = award_amount × multiplierProgress is tracked in the bonus table via turnover_met.
+Relationship overview
+Both tables capture per-user activity events at different layers:
+kpi_entity: business KPIs (DEPOSIT, WITHDRAW, SIGNUP, REFUND).
+turnover_entry: wagering/settlement turnover events (Casino/Premium/Sports/Sportsbook).
+They can be related by user using either:
+account_id (preferred when present in both rows), or
+account_path (useful for hierarchy rollups: agent/SDM/upline).
+Keys for joining
+Preferred key
+account_id (exact match).
+Pros: precise, stable key; best for per-user reconciliation.
+Note: kpi_entity.account_id may be nullable for some events until patched—filter those out or handle carefully.
+Alternative / hierarchical key
+account_path (string equality or prefix).
+Equality: per-user join if paths are identical.
+Prefix: to aggregate at upline levels (e.g., all users under an agent).
+Example prefix condition: te.account_path LIKE CONCAT(kpi.account_path, '/U/%') (adapt to your path pattern).
+Tenant scoping
+kpi_entity.sports_book (string/whitelabel) vs turnover_entry.house_id (numeric tenant).
+If cross-tenant joins are possible, scope joins by tenant using a mapping (sports_book ↔ house_id) or by also filtering on brand.
+Cardinality
+One user has many KPI events and many turnover entries → effectively many-to-many via the user when you join event streams. Most queries are time-bounded aggregations per user/brand.

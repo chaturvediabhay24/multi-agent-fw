@@ -9,6 +9,8 @@ export class ChatUI {
         this.isLoading = false;
         this.debugMode = false;
         this.agents = {};
+        this.toolCallEventSource = null;
+        this.activeToolCalls = new Map(); // Track active tool calls by ID
 
         // DOM elements
         this.agentSelector = document.getElementById('agentSelector');
@@ -20,6 +22,7 @@ export class ChatUI {
         this.debugBtn = document.getElementById('debugBtn');
         this.helpBtn = document.getElementById('helpBtn');
         this.newChatBtn = document.getElementById('newChatBtn');
+        this.killBtn = document.getElementById('killBtn');
         this.conversationsList = document.getElementById('conversationsList');
         this.commandsHelp = document.getElementById('commandsHelp');
     }
@@ -56,6 +59,7 @@ export class ChatUI {
         this.debugBtn.addEventListener('click', () => this.toggleDebugMode());
         this.helpBtn.addEventListener('click', () => this.toggleHelp());
         this.newChatBtn.addEventListener('click', () => this.startNewChat());
+        this.killBtn.addEventListener('click', () => this.handleKillConversation());
         document.getElementById('reloadBtn').addEventListener('click', () => this.reloadAgents());
     }
 
@@ -90,6 +94,288 @@ export class ChatUI {
         this.clearMessages();
         this.loadConversations();
         this.messageInput.focus();
+        
+        // Setup real-time tool call monitoring if conversation ID is available
+        if (this.currentConversationId) {
+            this.setupToolCallStream();
+        }
+    }
+
+    setupToolCallStream() {
+        // Close existing connection
+        if (this.toolCallEventSource) {
+            console.log('🔥 DEBUG: Closing existing SSE connection');
+            this.toolCallEventSource.close();
+        }
+
+        if (!this.currentConversationId) {
+            console.log('🔥 DEBUG: No conversation ID, skipping SSE setup');
+            return;
+        }
+
+        console.log('🔥 DEBUG: Setting up SSE connection for conversation:', this.currentConversationId);
+
+        // Setup Server-Sent Events for real-time tool calls
+        const streamUrl = `/api/tool-calls/stream/${this.currentConversationId}`;
+        console.log('🔥 DEBUG: SSE URL:', streamUrl);
+        
+        this.toolCallEventSource = new EventSource(streamUrl);
+        
+        this.toolCallEventSource.onopen = (event) => {
+            console.log('🔥 DEBUG: SSE connection opened:', event);
+        };
+        
+        this.toolCallEventSource.onmessage = (event) => {
+            console.log('🔥 DEBUG: Received SSE message:', event.data);
+            try {
+                const data = JSON.parse(event.data);
+                this.handleToolCallEvent(data);
+            } catch (error) {
+                console.error('Error parsing tool call event:', error);
+            }
+        };
+
+        this.toolCallEventSource.onerror = (error) => {
+            console.error('🔥 DEBUG: Tool call stream error:', error);
+        };
+    }
+
+    handleToolCallEvent(event) {
+        console.log('DEBUG: Received tool call event:', event);
+        
+        if (event.type === 'keepalive') return;
+
+        switch (event.type) {
+            case 'tool_call_start':
+                this.showToolCallStart(event);
+                break;
+            case 'tool_execution_start':
+                this.updateToolCallStatus(event.tool_id, 'executing');
+                break;
+            case 'tool_execution_complete':
+                this.updateToolCallStatus(event.tool_id, 'completed', event.result, event.execution_time_ms);
+                break;
+            case 'tool_execution_error':
+                this.updateToolCallStatus(event.tool_id, 'error', event.error, event.execution_time_ms);
+                break;
+            case 'llm_usage':
+                this.showLLMUsageDetails(event);
+                break;
+        }
+    }
+
+    showToolCallStart(event) {
+        // Create a simplified tool call display
+        const toolDiv = document.createElement('div');
+        toolDiv.className = 'tool-call tool-call-realtime';
+        toolDiv.id = `tool-call-${event.tool_id}`;
+        
+        toolDiv.innerHTML = `
+            <div class="tool-call-header" onclick="chatUI.toggleToolDetails('tool-call-${event.tool_id}')">
+                <span class="tool-call-icon">🔧</span>
+                <span class="tool-call-name">${Utils.escapeHtml(event.tool_name)}</span>
+                <span class="tool-call-status" id="status-${event.tool_id}">Requested</span>
+                <span class="tool-call-toggle">▼</span>
+            </div>
+            <div class="tool-call-details" style="display: none;">
+                <div class="tool-call-params">
+                    <strong>Input:</strong>
+                    <pre>${Utils.escapeHtml(JSON.stringify(event.params || {}, null, 2))}</pre>
+                </div>
+                <div class="tool-call-result" id="result-${event.tool_id}" style="display: none;"></div>
+            </div>
+        `;
+
+        // Add to the messages container
+        this.messagesContainer.appendChild(toolDiv);
+        this.messagesContainer.scrollTop = this.messagesContainer.scrollHeight;
+        
+        // Track the active tool call
+        this.activeToolCalls.set(event.tool_id, toolDiv);
+    }
+
+    updateToolCallStatus(toolId, status, result = null, executionTimeMs = null) {
+        const statusElement = document.getElementById(`status-${toolId}`);
+        const resultElement = document.getElementById(`result-${toolId}`);
+        
+        if (statusElement) {
+            switch (status) {
+                case 'executing':
+                    statusElement.textContent = 'Executing...';
+                    statusElement.className = 'tool-call-status executing';
+                    break;
+                case 'completed':
+                    const timeText = this.formatExecutionTime(executionTimeMs);
+                    statusElement.textContent = `Completed${timeText}`;
+                    statusElement.className = 'tool-call-status completed';
+                    if (result && resultElement) {
+                        resultElement.innerHTML = `
+                            <div class="tool-call-output">
+                                <strong>Output:</strong>
+                                <pre>${Utils.escapeHtml(result)}</pre>
+                            </div>
+                        `;
+                        resultElement.style.display = 'block';
+                    }
+                    break;
+                case 'error':
+                    const errorTimeText = this.formatExecutionTime(executionTimeMs);
+                    statusElement.textContent = `Error${errorTimeText}`;
+                    statusElement.className = 'tool-call-status error';
+                    if (result && resultElement) {
+                        resultElement.innerHTML = `
+                            <div class="tool-call-output error">
+                                <strong>Error:</strong>
+                                <pre>${Utils.escapeHtml(result)}</pre>
+                            </div>
+                        `;
+                        resultElement.style.display = 'block';
+                    }
+                    break;
+            }
+        }
+    }
+
+    formatExecutionTime(executionTimeMs) {
+        if (!executionTimeMs) return '';
+        
+        if (executionTimeMs < 1000) {
+            return ` (${executionTimeMs}ms)`;
+        } else if (executionTimeMs < 60000) {
+            return ` (${(executionTimeMs / 1000).toFixed(1)}s)`;
+        } else {
+            const minutes = Math.floor(executionTimeMs / 60000);
+            const seconds = ((executionTimeMs % 60000) / 1000).toFixed(1);
+            return ` (${minutes}m ${seconds}s)`;
+        }
+    }
+
+    showLLMUsageDetails(event) {
+        // Create LLM usage details component
+        const usageDiv = document.createElement('div');
+        usageDiv.className = 'llm-usage-details';
+        
+        const usageId = `usage-${Date.now()}`;
+        usageDiv.id = usageId;
+        
+        const responseTimeText = event.llm_response_time_ms ? this.formatExecutionTime(event.llm_response_time_ms) : '';
+        
+        usageDiv.innerHTML = `
+            <div class="llm-usage-header" onclick="chatUI.toggleUsageDetails('${usageId}')">
+                <span class="llm-usage-icon">📊</span>
+                <span class="llm-usage-title">LLM Metrics${responseTimeText}</span>
+                <span class="llm-usage-summary">${event.total_tokens || 'N/A'} tokens</span>
+                <span class="llm-usage-toggle">▼</span>
+            </div>
+            <div class="llm-usage-content" style="display: none;">
+                <div class="usage-grid">
+                    <div class="usage-item">
+                        <span class="usage-label">Model:</span>
+                        <span class="usage-value">${Utils.escapeHtml(event.model || 'Unknown')}</span>
+                    </div>
+                    <div class="usage-item">
+                        <span class="usage-label">Provider:</span>
+                        <span class="usage-value">${Utils.escapeHtml(event.provider || 'Unknown')}</span>
+                    </div>
+                    <div class="usage-item">
+                        <span class="usage-label">Input Tokens:</span>
+                        <span class="usage-value">${(event.input_tokens || 0).toLocaleString()}</span>
+                    </div>
+                    <div class="usage-item">
+                        <span class="usage-label">Output Tokens:</span>
+                        <span class="usage-value">${(event.output_tokens || 0).toLocaleString()}</span>
+                    </div>
+                    <div class="usage-item">
+                        <span class="usage-label">Total Tokens:</span>
+                        <span class="usage-value">${(event.total_tokens || 0).toLocaleString()}</span>
+                    </div>
+                    ${event.estimated_cost ? `
+                    <div class="usage-item cost-item">
+                        <span class="usage-label">Total Cost:</span>
+                        <span class="usage-value">$${event.estimated_cost.toFixed(6)}</span>
+                    </div>
+                    ` : ''}
+                    ${event.input_cost ? `
+                    <div class="usage-item">
+                        <span class="usage-label">Input Cost:</span>
+                        <span class="usage-value">$${event.input_cost.toFixed(6)}</span>
+                    </div>
+                    ` : ''}
+                    ${event.output_cost ? `
+                    <div class="usage-item">
+                        <span class="usage-label">Output Cost:</span>
+                        <span class="usage-value">$${event.output_cost.toFixed(6)}</span>
+                    </div>
+                    ` : ''}
+                    ${event.pricing_model ? `
+                    <div class="usage-item">
+                        <span class="usage-label">Pricing Model:</span>
+                        <span class="usage-value">${Utils.escapeHtml(event.pricing_model)}</span>
+                    </div>
+                    ` : ''}
+                    ${event.input_rate ? `
+                    <div class="usage-item">
+                        <span class="usage-label">Input Rate:</span>
+                        <span class="usage-value">$${event.input_rate}/1M tokens</span>
+                    </div>
+                    ` : ''}
+                    ${event.output_rate ? `
+                    <div class="usage-item">
+                        <span class="usage-label">Output Rate:</span>
+                        <span class="usage-value">$${event.output_rate}/1M tokens</span>
+                    </div>
+                    ` : ''}
+                    ${event.llm_response_time_ms ? `
+                    <div class="usage-item">
+                        <span class="usage-label">Response Time:</span>
+                        <span class="usage-value">${this.formatExecutionTime(event.llm_response_time_ms)}</span>
+                    </div>
+                    ` : ''}
+                    ${event.stop_reason ? `
+                    <div class="usage-item">
+                        <span class="usage-label">Stop Reason:</span>
+                        <span class="usage-value">${Utils.escapeHtml(event.stop_reason)}</span>
+                    </div>
+                    ` : ''}
+                </div>
+            </div>
+        `;
+
+        // Add to the messages container
+        this.messagesContainer.appendChild(usageDiv);
+        this.messagesContainer.scrollTop = this.messagesContainer.scrollHeight;
+    }
+
+    toggleUsageDetails(usageId) {
+        const usageDiv = document.getElementById(usageId);
+        if (!usageDiv) return;
+        
+        const content = usageDiv.querySelector('.llm-usage-content');
+        const toggle = usageDiv.querySelector('.llm-usage-toggle');
+        
+        if (content.style.display === 'none') {
+            content.style.display = 'block';
+            toggle.textContent = '▲';
+        } else {
+            content.style.display = 'none';
+            toggle.textContent = '▼';
+        }
+    }
+
+    toggleToolDetails(toolId) {
+        const toolDiv = document.getElementById(toolId);
+        if (!toolDiv) return;
+        
+        const details = toolDiv.querySelector('.tool-call-details');
+        const toggle = toolDiv.querySelector('.tool-call-toggle');
+        
+        if (details.style.display === 'none') {
+            details.style.display = 'block';
+            toggle.textContent = '▲';
+        } else {
+            details.style.display = 'none';
+            toggle.textContent = '▼';
+        }
     }
 
     handleKeyDown(event) {
@@ -114,6 +400,13 @@ export class ChatUI {
             return;
         }
 
+        // Generate conversation ID upfront if we don't have one yet
+        if (!this.currentConversationId) {
+            this.currentConversationId = 'conv_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+            console.log('🔥 DEBUG: Generated new conversation ID:', this.currentConversationId);
+            this.setupToolCallStream();
+        }
+
         this.setLoading(true);
 
         try {
@@ -124,13 +417,21 @@ export class ChatUI {
                 this.debugMode
             );
 
-            // Update conversation ID
-            if (data.conversation_id) {
+            // Debug logging
+            console.log('DEBUG: API Response data:', data);
+
+            // Update conversation ID if the backend returned a different one
+            if (data.conversation_id && data.conversation_id !== this.currentConversationId) {
+                console.log('🔥 DEBUG: Backend returned different conversation ID:', data.conversation_id);
+                const oldConversationId = this.currentConversationId;
                 this.currentConversationId = data.conversation_id;
+                
+                // Reconnect SSE stream with the new conversation ID
+                this.setupToolCallStream();
             }
 
             // Show assistant response
-            this.showMessage('assistant', data.response, data.tool_calls);
+            this.showMessage('assistant', data.response);
             
             // Reload conversations list
             this.loadConversations();
@@ -236,7 +537,9 @@ Debug Mode: ${this.debugMode ? 'ON' : 'OFF'}`;
         this.messageInput.focus();
     }
 
-    showMessage(role, content, toolCalls = null) {
+    showMessage(role, content) {
+        console.log('DEBUG: showMessage called with:', { role, content });
+        
         const messageDiv = document.createElement('div');
         messageDiv.className = `message ${role}`;
 
@@ -270,18 +573,8 @@ Debug Mode: ${this.debugMode ? 'ON' : 'OFF'}`;
         messageBody.appendChild(contentDiv);
         messageBody.appendChild(timeDiv);
 
-        // Add tool calls if present
-        if (toolCalls && toolCalls.length > 0) {
-            toolCalls.forEach(toolCall => {
-                const toolDiv = document.createElement('div');
-                toolDiv.className = 'tool-call';
-                toolDiv.innerHTML = `
-                    <div class="tool-call-name">🔧 ${Utils.escapeHtml(toolCall.name || toolCall.tool_name)}</div>
-                    <div class="tool-call-params">${Utils.escapeHtml(JSON.stringify(toolCall.params || toolCall.arguments || {}, null, 2))}</div>
-                `;
-                messageBody.appendChild(toolDiv);
-            });
-        }
+        // Tool calls are now displayed in real-time via SSE events
+        // No need to display them again here
 
         messageDiv.appendChild(messageBody);
 
@@ -313,6 +606,13 @@ Debug Mode: ${this.debugMode ? 'ON' : 'OFF'}`;
     setLoading(loading) {
         this.isLoading = loading;
         this.sendBtn.disabled = loading || !this.currentAgent;
+        
+        // Show/hide kill button based on loading state
+        if (loading && this.currentConversationId) {
+            this.killBtn.style.display = 'inline-block';
+        } else {
+            this.killBtn.style.display = 'none';
+        }
         
         if (loading) {
             const loadingDiv = document.createElement('div');
@@ -410,6 +710,55 @@ Debug Mode: ${this.debugMode ? 'ON' : 'OFF'}`;
             this.showMessage('system', `❌ Error reloading agents: ${error.message}`);
         } finally {
             Utils.setButtonLoading(reloadBtn, false);
+        }
+    }
+
+    async handleKillConversation() {
+        if (!this.currentConversationId || !this.isLoading) return;
+        
+        try {
+            // Update kill button to show it's processing
+            const originalText = this.killBtn.textContent;
+            this.killBtn.textContent = '⏹️ Stopping...';
+            this.killBtn.disabled = true;
+            
+            // Call the kill API
+            const response = await fetch(`/api/kill-conversation/${this.currentConversationId}`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                }
+            });
+            
+            if (response.ok) {
+                const data = await response.json();
+                console.log('Conversation killed:', data);
+                
+                // Stop loading state and hide kill button
+                this.setLoading(false);
+                
+                // Show system message about termination
+                this.showMessage('system', '🛑 Conversation stopped by user');
+                
+                // Close SSE connection if it exists
+                if (this.toolCallEventSource) {
+                    this.toolCallEventSource.close();
+                    this.toolCallEventSource = null;
+                }
+                
+            } else {
+                const error = await response.json();
+                console.error('Error killing conversation:', error);
+                this.showMessage('system', `❌ Failed to stop conversation: ${error.detail || 'Unknown error'}`);
+            }
+            
+        } catch (error) {
+            console.error('Error killing conversation:', error);
+            this.showMessage('system', `❌ Error stopping conversation: ${error.message}`);
+        } finally {
+            // Reset kill button
+            this.killBtn.textContent = '🛑 Stop';
+            this.killBtn.disabled = false;
         }
     }
 }

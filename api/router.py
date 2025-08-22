@@ -5,21 +5,138 @@ This module contains all the API endpoints for agent management, configuration, 
 """
 
 from fastapi import APIRouter, HTTPException, Request, Depends
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from typing import List, Optional, Dict, Any
 import json
 import sys
+import asyncio
 from pathlib import Path
 
 # Add the project root to the Python path for imports
 sys.path.append(str(Path(__file__).parent.parent))
 
 from agents.agent_registry import AgentRegistry
+
+# Memory-efficient tool call streaming using weak references and automatic cleanup
+import weakref
+from collections import defaultdict
+import time
+
+# Only keep active SSE connections, auto-cleanup on disconnect
+active_streams = weakref.WeakValueDictionary()  # conversation_id -> SSEStream instance
+
+class ToolCallStream:
+    """Memory-efficient tool call stream handler"""
+    
+    def __init__(self, conversation_id: str):
+        self.conversation_id = conversation_id
+        self.queue = asyncio.Queue(maxsize=10)  # Small buffer
+        self.last_activity = time.time()
+        self.is_active = True
+        
+        # Register this stream
+        active_streams[conversation_id] = self
+        
+    async def send_event(self, event: dict):
+        """Send event to stream if active"""
+        if not self.is_active:
+            return
+            
+        self.last_activity = time.time()
+        try:
+            self.queue.put_nowait(event)
+        except asyncio.QueueFull:
+            # Drop oldest event to make room
+            try:
+                self.queue.get_nowait()
+                self.queue.put_nowait(event)
+            except asyncio.QueueEmpty:
+                pass
+    
+    async def get_events(self):
+        """Generator for SSE events"""
+        try:
+            while self.is_active:
+                try:
+                    # Wait for event with timeout for cleanup
+                    event = await asyncio.wait_for(self.queue.get(), timeout=30.0)
+                    yield f"data: {json.dumps(event)}\n\n"
+                    self.last_activity = time.time()
+                except asyncio.TimeoutError:
+                    # Send keepalive and check if client is still connected
+                    yield f"data: {json.dumps({'type': 'keepalive'})}\n\n"
+                    
+                    # Auto-cleanup old inactive streams
+                    if time.time() - self.last_activity > 300:  # 5 minutes
+                        break
+                        
+        except asyncio.CancelledError:
+            pass
+        finally:
+            self.cleanup()
+    
+    def cleanup(self):
+        """Clean up resources"""
+        self.is_active = False
+        # Queue will be garbage collected automatically
+
+def broadcast_tool_call_event(conversation_id: str, event: dict):
+    """Efficiently broadcast to active stream only"""
+    stream = active_streams.get(conversation_id)
+    if stream:
+        asyncio.create_task(stream.send_event(event))
+
+def get_or_create_stream(conversation_id: str) -> ToolCallStream:
+    """Get existing stream or create new one"""
+    stream = active_streams.get(conversation_id)
+    if stream is None or not stream.is_active:
+        stream = ToolCallStream(conversation_id)
+        # Start cleanup task when first stream is created
+        start_cleanup_task()
+    return stream
+
+# Automatic cleanup task
+async def cleanup_inactive_streams():
+    """Periodic cleanup of inactive streams"""
+    while True:
+        try:
+            await asyncio.sleep(60)  # Check every minute
+            current_time = time.time()
+            
+            # Find inactive streams (using list() to avoid dict size change during iteration)
+            inactive_ids = []
+            for conv_id, stream in list(active_streams.items()):
+                if not stream.is_active or current_time - stream.last_activity > 300:  # 5 minutes
+                    inactive_ids.append(conv_id)
+            
+            # Clean up inactive streams
+            for conv_id in inactive_ids:
+                stream = active_streams.get(conv_id)
+                if stream:
+                    stream.cleanup()
+                    
+        except Exception as e:
+            print(f"Error in cleanup task: {e}")
+
+# Start cleanup task when module loads
+cleanup_task = None
+
+def start_cleanup_task():
+    """Start the cleanup task"""
+    global cleanup_task
+    if cleanup_task is None or cleanup_task.done():
+        cleanup_task = asyncio.create_task(cleanup_inactive_streams())
+
+# Cleanup task will be started lazily when first stream is created
+
 from agents.custom_agent import CustomAgent
 from conversations.conversation_manager import ConversationManager
 
 # Create API router
 router = APIRouter(prefix="/api", tags=["API"])
+
+# Note: Cleanup task will start when first stream is created
 
 # Data models
 class AgentConfig(BaseModel):
@@ -325,18 +442,12 @@ async def chat_with_agent(message: ChatMessage):
         # Send message and get response
         response = await agent.ainvoke(message.message)
         
-        # Extract tool calls if available
-        tool_calls = []
-        if hasattr(agent, 'get_tool_call_history'):
-            recent_calls = agent.get_tool_call_history()
-            # Get only the most recent tool calls from this invocation
-            if recent_calls:
-                tool_calls = recent_calls[-3:]  # Last 3 calls as example
+        # Tool calls are now handled in real-time via SSE events
+        # No need to extract them here
         
         return {
             "response": response,
-            "conversation_id": agent.conversation_id,
-            "tool_calls": tool_calls
+            "conversation_id": agent.conversation_id
         }
         
     except HTTPException:
@@ -403,3 +514,58 @@ async def get_conversation(conversation_id: str):
         return {"conversation": conversation}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error loading conversation: {str(e)}")
+
+@router.get("/tool-calls/stream/{conversation_id}")
+async def stream_tool_calls(conversation_id: str):
+    """Memory-efficient tool call streaming using SSE"""
+    
+    stream = get_or_create_stream(conversation_id)
+    
+    return StreamingResponse(
+        stream.get_events(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+        }
+    )
+
+@router.post("/kill-conversation/{conversation_id}")
+async def kill_conversation(conversation_id: str):
+    """Kill/stop an active conversation and agent processing"""
+    try:
+        # Get the active stream for this conversation
+        stream = active_streams.get(conversation_id)
+        if stream:
+            # Send kill signal to the stream
+            await stream.send_event({
+                "type": "conversation_killed", 
+                "conversation_id": conversation_id,
+                "message": "Conversation terminated by user"
+            })
+            # Mark stream as inactive to stop processing
+            stream.cleanup()
+        
+        # Look for any active agent processing for this conversation
+        # and signal termination if the agent supports it
+        agent = None
+        if registry._agents:
+            for agent_name, agent_instance in registry._agents.items():
+                if hasattr(agent_instance, 'conversation_id') and agent_instance.conversation_id == conversation_id:
+                    agent = agent_instance
+                    break
+        
+        if agent and hasattr(agent, 'cancel_processing'):
+            agent.cancel_processing()
+        
+        return {
+            "message": f"Conversation {conversation_id} terminated successfully",
+            "conversation_id": conversation_id,
+            "status": "killed"
+        }
+        
+    except Exception as e:
+        import traceback
+        print(f"Error killing conversation {conversation_id}: {e}")
+        print(traceback.format_exc())
+        raise HTTPException(status_code=500, detail=f"Error killing conversation: {str(e)}")

@@ -178,6 +178,18 @@ body {
     color: white;
 }
 
+.control-btn.kill-btn {
+    background: #dc3545;
+    color: white;
+    font-weight: 600;
+    border: 1px solid #c82333;
+}
+
+.control-btn.kill-btn:hover {
+    background: #c82333;
+    transform: scale(1.05);
+}
+
 /* Messages */
 .messages-container {
     flex: 1;
@@ -252,24 +264,264 @@ body {
     background: #fff3cd;
     border: 1px solid #ffeaa7;
     border-radius: 8px;
-    padding: 10px;
+    padding: 12px;
     margin-top: 8px;
     font-size: 0.85rem;
 }
 
+.tool-call-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 12px 16px;
+    cursor: pointer;
+    transition: background-color 0.2s ease;
+    border-bottom: 1px solid #ffeaa7;
+}
+
+.tool-call-header:hover {
+    background: rgba(255, 234, 167, 0.3);
+}
+
+.tool-call-icon {
+    font-size: 1rem;
+}
+
 .tool-call-name {
-    font-weight: 600;
+    font-weight: 700;
     color: #856404;
-    margin-bottom: 5px;
+    font-size: 0.9rem;
+    background: rgba(133, 100, 4, 0.1);
+    padding: 2px 8px;
+    border-radius: 12px;
+    border: 1px solid rgba(133, 100, 4, 0.2);
+}
+
+.tool-call-status {
+    font-size: 0.75rem;
+    color: #856404;
+    background: rgba(133, 100, 4, 0.15);
+    padding: 1px 6px;
+    border-radius: 8px;
+    font-weight: 500;
+    flex: 1;
+    text-align: right;
+}
+
+.tool-call-toggle {
+    font-size: 0.8rem;
+    color: #856404;
+    margin-left: 12px;
+    transition: transform 0.2s ease;
+}
+
+/* Tool call details section (collapsible) */
+.tool-call-details {
+    padding: 16px;
+    background: #fff;
+    border-top: 1px solid #ffeaa7;
 }
 
 .tool-call-params {
+    margin-bottom: 12px;
+}
+
+.tool-call-params strong {
+    display: block;
+    margin-bottom: 6px;
+    color: #495057;
+    font-size: 0.85rem;
+}
+
+.tool-call-params pre {
     color: #666;
     font-family: monospace;
     background: rgba(0,0,0,0.05);
-    padding: 4px 8px;
-    border-radius: 4px;
+    padding: 8px 10px;
+    border-radius: 6px;
     font-size: 0.8rem;
+    line-height: 1.4;
+    margin: 0;
+    white-space: pre-wrap;
+    overflow-x: auto;
+}
+
+.tool-call-output {
+    margin-top: 12px;
+}
+
+.tool-call-output strong {
+    display: block;
+    margin-bottom: 6px;
+    color: #495057;
+    font-size: 0.85rem;
+}
+
+.tool-call-output pre {
+    color: #666;
+    font-family: monospace;
+    background: rgba(40, 167, 69, 0.05);
+    border-left: 3px solid #28a745;
+    padding: 8px 10px;
+    border-radius: 6px;
+    font-size: 0.8rem;
+    line-height: 1.4;
+    margin: 0;
+    white-space: pre-wrap;
+    overflow-x: auto;
+}
+
+.tool-call-output.error pre {
+    background: rgba(220, 53, 69, 0.05);
+    border-left-color: #dc3545;
+}
+
+
+/* Real-time tool call styles */
+.tool-call-realtime {
+    margin: 10px 0;
+    animation: slideIn 0.3s ease-out;
+}
+
+@keyframes slideIn {
+    from {
+        opacity: 0;
+        transform: translateY(-10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+/* Status-specific styles */
+.tool-call-status.executing {
+    background: rgba(255, 193, 7, 0.2);
+    color: #856404;
+    animation: pulse 1.5s infinite;
+}
+
+@keyframes pulse {
+    0% { opacity: 1; }
+    50% { opacity: 0.7; }
+    100% { opacity: 1; }
+}
+
+.tool-call-status.completed {
+    background: rgba(40, 167, 69, 0.2);
+    color: #155724;
+}
+
+.tool-call-status.error {
+    background: rgba(220, 53, 69, 0.2);
+    color: #721c24;
+}
+
+/* LLM Usage Details */
+.llm-usage-details {
+    background: #f8f9fa;
+    border: 1px solid #dee2e6;
+    border-radius: 8px;
+    margin: 10px 0;
+    overflow: hidden;
+    animation: slideIn 0.3s ease-out;
+}
+
+.llm-usage-header {
+    display: flex;
+    align-items: center;
+    padding: 12px 16px;
+    background: #e9ecef;
+    cursor: pointer;
+    transition: background-color 0.2s ease;
+    border-bottom: 1px solid #dee2e6;
+}
+
+.llm-usage-header:hover {
+    background: #dee2e6;
+}
+
+.llm-usage-icon {
+    font-size: 1rem;
+    margin-right: 8px;
+}
+
+.llm-usage-title {
+    font-weight: 600;
+    color: #495057;
+    flex: 1;
+}
+
+.llm-usage-summary {
+    font-size: 0.85rem;
+    color: #6c757d;
+    margin-right: 12px;
+    background: rgba(0, 123, 255, 0.1);
+    padding: 2px 8px;
+    border-radius: 12px;
+}
+
+.llm-usage-toggle {
+    font-size: 0.8rem;
+    color: #6c757d;
+    transition: transform 0.2s ease;
+}
+
+.llm-usage-content {
+    padding: 16px;
+    background: #fff;
+}
+
+.usage-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 12px;
+}
+
+.usage-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px 12px;
+    background: #f8f9fa;
+    border-radius: 6px;
+    border-left: 3px solid #007bff;
+}
+
+.usage-label {
+    font-weight: 500;
+    color: #495057;
+    font-size: 0.85rem;
+}
+
+.usage-value {
+    font-weight: 600;
+    color: #212529;
+    font-size: 0.85rem;
+    font-family: monospace;
+}
+
+/* Special styling for cost items */
+.usage-item.cost-item {
+    border-left-color: #28a745;
+    background: rgba(40, 167, 69, 0.05);
+}
+
+.usage-item.cost-item .usage-value {
+    color: #28a745;
+    font-weight: 700;
+}
+
+/* Cost breakdown items */
+.usage-item:has(.usage-label:contains("Input Cost")),
+.usage-item:has(.usage-label:contains("Output Cost")) {
+    border-left-color: #17a2b8;
+    background: rgba(23, 162, 184, 0.05);
+}
+
+.usage-item:has(.usage-label:contains("Input Cost")) .usage-value,
+.usage-item:has(.usage-label:contains("Output Cost")) .usage-value {
+    color: #17a2b8;
 }
 
 /* Input area */

@@ -17,6 +17,7 @@ class CustomAgent(BaseAgent):
         self.max_parallel_tools = config.get('max_parallel_tools', 2)  # Limit concurrent tools
         self._last_had_tool_calls = False  # Track tool call usage for fallback logic
         self._conversation_managed_by_provider = False  # Track if provider managed conversation history
+        self._cancellation_requested = False  # Flag for conversation cancellation
         
         # Load agent-specific tools (including memory tools automatically)
         agent_tools = self.get_available_tools()
@@ -29,6 +30,9 @@ class CustomAgent(BaseAgent):
     
     async def _aprocess_message(self, message: str) -> str:
         """Async process message with structured tool calling"""
+        # Check for cancellation at the start
+        self._check_cancellation()
+        
         available_tools = self.get_available_tools()
         self.tool_calls_made = []  # Reset tool calls for this message
         self._conversation_managed_by_provider = False  # Reset flag
@@ -52,6 +56,9 @@ class CustomAgent(BaseAgent):
     
     async def _aprocess_with_structured_tools(self, message: str, available_tool_names: List[str]) -> str:
         """Async process message using structured tool calling"""
+        # Check for cancellation
+        self._check_cancellation()
+        
         # Get tool instances
         tools = []
         for tool_name in available_tool_names:
@@ -67,6 +74,9 @@ class CustomAgent(BaseAgent):
         
         if self.debug_mode:
             print(f"🔧 DEBUG: Converted {len(langchain_tools)} tools for structured calling")
+        
+        # Set conversation ID for real-time tool call events
+        self.model_provider.current_conversation_id = self.conversation_id
         
         # Async invoke model with tools
         response = await self.model_provider.ainvoke_with_tools(
@@ -86,13 +96,30 @@ class CustomAgent(BaseAgent):
                 updated_messages = response['messages']
                 content = response.get('content', '')
                 
-                # Update conversation history with the messages from provider
-                # Remove current messages and replace with updated ones from provider
+                # Extract tool calls from the new messages added by provider
                 original_count = len(self.conversation_history)
+                new_messages = updated_messages[original_count:]
+                
+                # Extract tool call information from new AI messages
+                for msg in new_messages:
+                    if hasattr(msg, 'tool_calls') and msg.tool_calls:
+                        for tool_call in msg.tool_calls:
+                            tool_call_info = {
+                                'tool_name': tool_call.get('name', 'unknown'),
+                                'params': tool_call.get('args', {}),
+                                'result': 'Tool executed by provider',
+                                'success': True
+                            }
+                            self.tool_calls_made.append(tool_call_info)
+                            if self.debug_mode:
+                                print(f"🔧 DEBUG: Recorded tool call: {tool_call_info['tool_name']}")
+                
+                # Update conversation history with the messages from provider
                 self.conversation_history = updated_messages
                 
                 if self.debug_mode:
                     print(f"🔧 DEBUG: Updated conversation history from {original_count} to {len(self.conversation_history)} messages")
+                    print(f"🔧 DEBUG: Recorded {len([tc for tc in self.tool_calls_made])} tool calls from provider")
                 
                 # Signal that conversation history is already managed
                 self._conversation_managed_by_provider = True
@@ -556,33 +583,55 @@ User request: {message}"""
     
     async def ainvoke(self, message: str, save_conversation: bool = True) -> str:
         """Override base ainvoke to handle provider-managed conversation history"""
-        # Get system prompt if defined
-        system_prompt = self.config.get('system_prompt', '') + self.config.get('memory', '')
-        if system_prompt and not any(isinstance(msg, SystemMessage) for msg in self.conversation_history):
-            self.add_system_message(system_prompt)
+        # Reset cancellation flag for new messages
+        self.reset_cancellation()
         
-        # Add user message to history
-        user_message = HumanMessage(content=message)
-        self.conversation_history.append(user_message)
+        try:
+            # Get system prompt if defined
+            system_prompt = self.config.get('system_prompt', '') + self.config.get('memory', '')
+            if system_prompt and not any(isinstance(msg, SystemMessage) for msg in self.conversation_history):
+                self.add_system_message(system_prompt)
+            
+            # Add user message to history
+            user_message = HumanMessage(content=message)
+            self.conversation_history.append(user_message)
+            
+            # Process the message
+            response = await self._aprocess_message(message)
+            
+            # Only add AI response if provider didn't manage conversation history
+            if not self._conversation_managed_by_provider:
+                ai_message = AIMessage(content=response)
+                self.conversation_history.append(ai_message)
+            
+            # Save conversation if requested
+            if save_conversation:
+                self.conversation_manager.save_conversation(
+                    self.conversation_id,
+                    self.conversation_history,
+                    metadata={
+                        'agent_name': self.name,
+                        'model_type': self.config.get('model_type'),
+                        'model_name': self.config.get('model_name')
+                    }
+                )
+            
+            return response
         
-        # Process the message
-        response = await self._aprocess_message(message)
-        
-        # Only add AI response if provider didn't manage conversation history
-        if not self._conversation_managed_by_provider:
-            ai_message = AIMessage(content=response)
-            self.conversation_history.append(ai_message)
-        
-        # Save conversation if requested
-        if save_conversation:
-            self.conversation_manager.save_conversation(
-                self.conversation_id,
-                self.conversation_history,
-                metadata={
-                    'agent_name': self.name,
-                    'model_type': self.config.get('model_type'),
-                    'model_name': self.config.get('model_name')
-                }
-            )
-        
-        return response
+        except asyncio.CancelledError as e:
+            print(f"🛑 Processing cancelled for agent {self.name}: {e}")
+            return f"🛑 Processing was cancelled by user request"
+    
+    def cancel_processing(self):
+        """Cancel ongoing processing for this agent"""
+        print(f"🛑 Cancellation requested for agent {self.name}")
+        self._cancellation_requested = True
+    
+    def reset_cancellation(self):
+        """Reset cancellation flag"""
+        self._cancellation_requested = False
+    
+    def _check_cancellation(self):
+        """Check if processing should be cancelled"""
+        if self._cancellation_requested:
+            raise asyncio.CancelledError("Processing cancelled by user request")

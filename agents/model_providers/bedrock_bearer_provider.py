@@ -8,6 +8,53 @@ from langchain_core.tools import BaseTool
 from .base_provider import BaseModelProvider
 
 
+def load_model_pricing():
+    """Load model pricing from configuration file"""
+    try:
+        import json
+        from pathlib import Path
+        
+        # Get the config file path
+        current_dir = Path(__file__).parent.parent.parent
+        pricing_file = current_dir / 'config' / 'model_pricing.json'
+        
+        if pricing_file.exists():
+            with open(pricing_file, 'r') as f:
+                pricing_config = json.load(f)
+                return pricing_config.get('models', {}), pricing_config.get('default', {})
+        else:
+            print(f"Warning: Pricing file not found at {pricing_file}, using fallback pricing")
+            return {}, {}
+    except Exception as e:
+        print(f"Warning: Error loading pricing config: {e}, using fallback pricing")
+        return {}, {}
+
+# Load pricing from config file with fallback
+MODEL_PRICING, DEFAULT_PRICING = load_model_pricing()
+
+# Fallback pricing if config file is missing
+if not MODEL_PRICING:
+    MODEL_PRICING = {
+        'anthropic.claude-3-haiku-20240307-v1:0': {
+            'input_cost_per_1m': 0.25, 'output_cost_per_1m': 1.25
+        },
+        'anthropic.claude-3-sonnet-20240229-v1:0': {
+            'input_cost_per_1m': 3.0, 'output_cost_per_1m': 15.0
+        },
+        'anthropic.claude-3-7-sonnet-20250219-v1:0': {
+            'input_cost_per_1m': 3.0, 'output_cost_per_1m': 15.0
+        },
+        'anthropic.claude-3-opus-20240229-v1:0': {
+            'input_cost_per_1m': 15.0, 'output_cost_per_1m': 75.0
+        }
+    }
+
+if not DEFAULT_PRICING:
+    DEFAULT_PRICING = {
+        'input_cost_per_1m': 3.0, 'output_cost_per_1m': 15.0
+    }
+
+
 class BedrockBearerProvider(BaseModelProvider):
     """AWS Bedrock Claude provider using bearer token authentication"""
     
@@ -186,6 +233,24 @@ class BedrockBearerProvider(BaseModelProvider):
                     tool_calls.append(tool_call)
                     print(f"🔧 Tool Request - Name: {tool_call['name']}, ID: {tool_call['id']}")
                     print(f"📋 Tool Parameters: {json.dumps(tool_call['args'], indent=2)}")
+                    
+                    # Broadcast tool call event immediately
+                    try:
+                        from api.router import broadcast_tool_call_event
+                        # Get conversation_id from working_messages context if available
+                        conversation_id = getattr(self, 'current_conversation_id', 'unknown')
+                        
+                        event = {
+                            'type': 'tool_call_start',
+                            'tool_name': tool_call['name'],
+                            'tool_id': tool_call['id'],
+                            'params': tool_call['args'],
+                            'timestamp': json.dumps(None, default=str)  # Will be current time
+                        }
+                        broadcast_tool_call_event(conversation_id, event)
+                    except Exception as e:
+                        print(f"Warning: Failed to broadcast tool call event: {e}")
+                        
                 elif block.get('type') == 'text':
                     text_content.append(block.get('text', ''))
             
@@ -227,6 +292,26 @@ class BedrockBearerProvider(BaseModelProvider):
                 if tool_to_execute:
                     try:
                         print(f"⚡ Executing tool: {tool_name}")
+                        
+                        # Broadcast tool execution start
+                        start_time = None
+                        try:
+                            import time
+                            start_time = time.time()
+                            
+                            from api.router import broadcast_tool_call_event
+                            conversation_id = getattr(self, 'current_conversation_id', 'unknown')
+                            event = {
+                                'type': 'tool_execution_start',
+                                'tool_name': tool_name,
+                                'tool_id': tool_id,
+                                'status': 'executing',
+                                'start_time': start_time
+                            }
+                            broadcast_tool_call_event(conversation_id, event)
+                        except Exception:
+                            pass
+                        
                         # Execute the tool using the correct LangChain method
                         # LangChain tools expect a single input parameter or JSON string
                         if hasattr(tool_to_execute, 'ainvoke'):
@@ -243,9 +328,52 @@ class BedrockBearerProvider(BaseModelProvider):
                         
                         tool_result = str(result)
                         print(f"✅ Tool Response ({tool_name}): {tool_result[:200]}{'...' if len(tool_result) > 200 else ''}")
+                        
+                        # Broadcast tool execution completion
+                        try:
+                            import time
+                            end_time = time.time()
+                            execution_time = end_time - start_time if start_time else 0
+                            
+                            from api.router import broadcast_tool_call_event
+                            conversation_id = getattr(self, 'current_conversation_id', 'unknown')
+                            event = {
+                                'type': 'tool_execution_complete',
+                                'tool_name': tool_name,
+                                'tool_id': tool_id,
+                                'status': 'completed',
+                                'result': tool_result[:500],  # Truncate long results
+                                'execution_time': execution_time,
+                                'execution_time_ms': round(execution_time * 1000, 1)
+                            }
+                            broadcast_tool_call_event(conversation_id, event)
+                        except Exception:
+                            pass
+                            
                     except Exception as e:
                         tool_result = f"Error executing tool {tool_name}: {str(e)}"
                         print(f"❌ Tool Error ({tool_name}): {tool_result}")
+                        
+                        # Broadcast tool execution error
+                        try:
+                            import time
+                            end_time = time.time()
+                            execution_time = end_time - start_time if start_time else 0
+                            
+                            from api.router import broadcast_tool_call_event
+                            conversation_id = getattr(self, 'current_conversation_id', 'unknown')
+                            event = {
+                                'type': 'tool_execution_error',
+                                'tool_name': tool_name,
+                                'tool_id': tool_id,
+                                'status': 'error',
+                                'error': tool_result,
+                                'execution_time': execution_time,
+                                'execution_time_ms': round(execution_time * 1000, 1)
+                            }
+                            broadcast_tool_call_event(conversation_id, event)
+                        except Exception:
+                            pass
                 else:
                     tool_result = f"Tool {tool_name} not found"
                 
@@ -273,6 +401,10 @@ class BedrockBearerProvider(BaseModelProvider):
         }
         
         try:
+            # Track LLM response timing
+            import time
+            llm_start_time = time.time()
+            
             async with aiohttp.ClientSession() as session:
                 async with session.post(self.endpoint, 
                                        json=payload, 
@@ -284,6 +416,17 @@ class BedrockBearerProvider(BaseModelProvider):
                         self._handle_bedrock_error(response.status, error_text)
                     
                     result = await response.json()
+                    
+                    # Calculate LLM response time
+                    llm_end_time = time.time()
+                    llm_response_time = llm_end_time - llm_start_time
+                    
+                    # Add timing to result for usage tracking
+                    result['_llm_response_time'] = llm_response_time
+                    
+                    # Extract usage information and broadcast it
+                    self._broadcast_llm_usage(result)
+                    
                     return result
                         
         except aiohttp.ClientError as e:
@@ -299,6 +442,67 @@ class BedrockBearerProvider(BaseModelProvider):
         """Check if AWS Bedrock bearer token is available"""
         return bool(os.getenv('AWS_BEARER_TOKEN_BEDROCK'))
     
+    def _broadcast_llm_usage(self, response: dict):
+        """Extract and broadcast LLM usage information"""
+        try:
+            from api.router import broadcast_tool_call_event
+            conversation_id = getattr(self, 'current_conversation_id', 'unknown')
+            
+            # Extract usage information from Bedrock response
+            usage_info = {
+                'type': 'llm_usage',
+                'model': self.model_name,
+                'provider': 'bedrock',
+                'conversation_id': conversation_id
+            }
+            
+            # Extract token usage if available
+            if 'usage' in response:
+                usage = response['usage']
+                usage_info.update({
+                    'input_tokens': usage.get('input_tokens', 0),
+                    'output_tokens': usage.get('output_tokens', 0),
+                    'total_tokens': usage.get('input_tokens', 0) + usage.get('output_tokens', 0)
+                })
+            
+            # Extract stop reason if available
+            if 'stop_reason' in response:
+                usage_info['stop_reason'] = response['stop_reason']
+            
+            # Add response metadata
+            if 'model' in response:
+                usage_info['response_model'] = response['model']
+            
+            # Add LLM response timing
+            if '_llm_response_time' in response:
+                response_time = response['_llm_response_time']
+                usage_info.update({
+                    'llm_response_time': response_time,
+                    'llm_response_time_ms': round(response_time * 1000, 1)
+                })
+                
+            # Calculate accurate cost using pricing dictionary
+            if 'input_tokens' in usage_info and 'output_tokens' in usage_info:
+                pricing = MODEL_PRICING.get(self.model_name, DEFAULT_PRICING)
+                
+                input_cost = (usage_info['input_tokens'] / 1_000_000) * pricing['input_cost_per_1m']
+                output_cost = (usage_info['output_tokens'] / 1_000_000) * pricing['output_cost_per_1m']
+                total_cost = input_cost + output_cost
+                
+                usage_info.update({
+                    'estimated_cost': round(total_cost, 6),
+                    'input_cost': round(input_cost, 6),
+                    'output_cost': round(output_cost, 6),
+                    'pricing_model': self.model_name if self.model_name in MODEL_PRICING else 'default',
+                    'input_rate': pricing['input_cost_per_1m'],
+                    'output_rate': pricing['output_cost_per_1m']
+                })
+            
+            broadcast_tool_call_event(conversation_id, usage_info)
+            
+        except Exception as e:
+            print(f"Warning: Failed to broadcast LLM usage: {e}")
+
     def _handle_bedrock_error(self, status: int, error_text: str):
         """Handle common Bedrock API errors"""
         if status == 403:
