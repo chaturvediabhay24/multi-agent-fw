@@ -54,7 +54,7 @@ class AppendMemoryTool(BaseTool):
         super().__init__(
             name="append_memory", 
             description=f'''
-            Add new information to the memory for agent {agent_name}.
+            Add new information to the memory for the current agent.
 
             Use this tool to save important facts, context, or observations that the agent should remember for future interactions.
             You can call this tool directly with any information that you believe is valuable for the agent's future performance or efficiency.
@@ -113,7 +113,7 @@ class AppendMemoryTool(BaseTool):
             with open(self.config_path, 'w') as f:
                 json.dump(config, f, indent=2)
             
-            return f"Memory updated successfully. Added: {text.strip()}"
+            return f"Memory updated successfully for agent '{self.agent_name}'. Added: {text.strip()}"
             
         except Exception as e:
             return f"Error appending to memory: {str(e)}"

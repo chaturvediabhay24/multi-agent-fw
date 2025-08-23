@@ -62,7 +62,7 @@ class CustomAgent(BaseAgent):
         # Get tool instances
         tools = []
         for tool_name in available_tool_names:
-            tool = self.tool_registry.get_tool(tool_name)
+            tool = self.tool_registry.get_tool(tool_name, self.name)
             if tool:
                 tools.append(tool)
         
@@ -189,7 +189,7 @@ class CustomAgent(BaseAgent):
             # Execute the tool (run in thread pool if it's not async)
             # Use a lambda to handle kwargs properly
             result = await asyncio.get_event_loop().run_in_executor(
-                None, lambda: self.tool_registry.execute_tool(tool_name, **tool_args)
+                None, lambda: self.tool_registry.execute_tool(tool_name, agent_name=self.name, **tool_args)
             )
             
             # Store tool call info
@@ -363,7 +363,7 @@ User request: {message}"""
                     print(f"🔧 DEBUG: Executing tool {tool_name} with params: {params}")
                 
                 # Execute the tool
-                result = self.tool_registry.execute_tool(tool_name, **params)
+                result = self.tool_registry.execute_tool(tool_name, agent_name=self.name, **params)
                 
                 # Store tool call info
                 tool_call_info = {
@@ -507,7 +507,7 @@ User request: {message}"""
         try:
             # Execute the tool
             result = await asyncio.get_event_loop().run_in_executor(
-                None, lambda: self.tool_registry.execute_tool(tool_name, **params)
+                None, lambda: self.tool_registry.execute_tool(tool_name, agent_name=self.name, **params)
             )
             
             # Store tool call info

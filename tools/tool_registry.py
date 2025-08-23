@@ -39,17 +39,24 @@ class ToolRegistry:
         """Register a tool in the registry"""
         self._tools[name] = tool
     
-    def get_tool(self, name: str) -> Optional[BaseTool]:
-        """Get a tool by name"""
+    def get_tool(self, name: str, agent_name: str = None) -> Optional[BaseTool]:
+        """Get a tool by name, handling agent-specific tools"""
+        # Try agent-specific key first for memory tools
+        if name in ['read_memory', 'append_memory'] and agent_name:
+            tool_key = f"{name}_{agent_name}"
+            if tool_key in self._tools:
+                return self._tools[tool_key]
+        
+        # Fall back to regular tool name
         return self._tools.get(name)
     
     def list_tools(self) -> Dict[str, str]:
         """List all registered tools with their descriptions"""
         return {name: tool.description for name, tool in self._tools.items()}
     
-    def execute_tool(self, name: str, **kwargs):
+    def execute_tool(self, name: str, agent_name: str = None, **kwargs):
         """Execute a tool by name"""
-        tool = self.get_tool(name)
+        tool = self.get_tool(name, agent_name)
         if not tool:
             raise ValueError(f"Tool '{name}' not found")
         
@@ -58,8 +65,11 @@ class ToolRegistry:
     def load_tools_for_agent(self, tool_names: List[str], agent_name: str = None):
         """Load specific tools for an agent, including dynamic agent proxy tools and memory tools"""
         for tool_name in tool_names:
-            if tool_name not in self._tools:
-                # Handle memory tools specially (they need agent_name)
+            # Create unique tool key for agent-specific tools
+            tool_key = f"{tool_name}_{agent_name}" if tool_name in ['read_memory', 'append_memory'] and agent_name else tool_name
+            
+            if tool_key not in self._tools:
+                # Handle memory tools specially (they need agent_name and should be unique per agent)
                 if tool_name in ['read_memory', 'append_memory'] and agent_name:
                     try:
                         from tools.memory_tools import ReadMemoryTool, AppendMemoryTool
@@ -67,7 +77,7 @@ class ToolRegistry:
                             tool_instance = ReadMemoryTool(agent_name)
                         else:  # append_memory
                             tool_instance = AppendMemoryTool(agent_name)
-                        self.register_tool(tool_name, tool_instance)
+                        self.register_tool(tool_key, tool_instance)
                     except Exception as e:
                         print(f"Warning: Failed to load memory tool '{tool_name}': {e}")
                 elif tool_name in self._available_tools:
