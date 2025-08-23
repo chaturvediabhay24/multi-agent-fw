@@ -18,14 +18,21 @@ class AgentProxyTool(BaseTool):
             description=description
         )
     
-    def _get_target_agent(self):
-        """Get the target agent, loading from config if necessary"""
-        target_agent = self.agent_registry.get_agent(self.agent_name)
+    def _get_target_agent(self, conversation_id: str = None):
+        """Get a fresh target agent instance for conversation isolation"""
+        import uuid
+        
+        # Generate unique conversation ID for this tool call to ensure isolation
+        if not conversation_id:
+            conversation_id = str(uuid.uuid4())
+            
+        # Always get a fresh instance to avoid conversation interference
+        target_agent = self.agent_registry.get_agent(self.agent_name, conversation_id)
         
         if not target_agent:
             try:
                 self.agent_registry.load_agents_from_config()
-                target_agent = self.agent_registry.get_agent(self.agent_name)
+                target_agent = self.agent_registry.get_agent(self.agent_name, conversation_id)
             except Exception:
                 pass
         
@@ -101,8 +108,9 @@ class AgentProxyTool(BaseTool):
                     'formatted_result': f"Error: {self.agent_name} agent is not available"
                 }
             
-            # Call the target agent asynchronously
-            response = await target_agent.ainvoke(str(message), save_conversation=True)
+            # Call the target agent asynchronously with conversation isolation
+            # Disable conversation saving to prevent cross-contamination
+            response = await target_agent.ainvoke(str(message), save_conversation=False)
             
             # Get agent info for metadata
             agent_info = {

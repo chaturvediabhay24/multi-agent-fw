@@ -1,6 +1,4 @@
 import importlib
-import json
-import os
 from typing import Dict, Optional
 
 from agents.base_agent import BaseAgent
@@ -21,12 +19,21 @@ class AgentRegistry:
         """Register an agent in the registry"""
         self._agents[name] = agent
     
-    def get_agent(self, name: str) -> Optional[BaseAgent]:
-        """Get an agent by name"""
-        return self._agents.get(name)
+    def get_agent(self, name: str, conversation_id: Optional[str] = None) -> Optional[BaseAgent]:
+        """Get an agent by name, creating a new instance for conversation isolation"""
+        # Always create a new instance to avoid conversation interference
+        return self.create_fresh_agent_instance(name, conversation_id)
     
     def list_agents(self) -> Dict[str, str]:
         """List all registered agents with their descriptions"""
+        # For listing, we can use cached agents or create temporary instances
+        if not self._agents:
+            # Load agents to registry for listing purposes
+            try:
+                self.load_agents_from_config()
+            except Exception:
+                pass
+        
         return {name: agent.get_description() for name, agent in self._agents.items()}
     
     def load_agents_from_config(self):
@@ -56,7 +63,26 @@ class AgentRegistry:
                 agent = CustomAgent(agent_name, agent_config)
                 self.register_agent(agent_name, agent)
     
-    def create_agent_from_config(self, agent_name: str, config: Dict) -> BaseAgent:
+    def create_fresh_agent_instance(self, agent_name: str, conversation_id: Optional[str] = None) -> Optional[BaseAgent]:
+        """Create a fresh agent instance for conversation isolation"""
+        try:
+            agents_config = self.config_manager.get_all_agent_configs()
+            
+            if agent_name not in agents_config:
+                return None
+            
+            config = agents_config[agent_name].copy()  # Copy to avoid modifying original
+            
+            if not self.config_manager.validate_agent_config(config):
+                return None
+            
+            return self.create_agent_from_config(agent_name, config, conversation_id)
+            
+        except Exception as e:
+            print(f"Error creating fresh agent instance for '{agent_name}': {e}")
+            return None
+    
+    def create_agent_from_config(self, agent_name: str, config: Dict, conversation_id: Optional[str] = None) -> BaseAgent:
         """Create a single agent from configuration"""
         if not self.config_manager.validate_agent_config(config):
             raise ValueError(f"Invalid configuration for agent '{agent_name}'")
@@ -66,7 +92,7 @@ class AgentRegistry:
         try:
             module = importlib.import_module(f"agents.{agent_class_name.lower()}")
             agent_class = getattr(module, agent_class_name)
-            return agent_class(agent_name, config)
+            return agent_class(agent_name, config, conversation_id)
         except (ImportError, AttributeError):
             from agents.custom_agent import CustomAgent
-            return CustomAgent(agent_name, config)
+            return CustomAgent(agent_name, config, conversation_id)

@@ -96,18 +96,21 @@ class BaseAgent(ABC):
         """Synchronous process message (for backward compatibility) - runs async version"""
         return asyncio.run(self._aprocess_message(message))
     
-    async def acall_agent(self, agent_name: str, message: str, save_conversation: bool = True) -> str:
-        """Async call another agent as a tool"""
+    async def acall_agent(self, agent_name: str, message: str) -> str:
+        """Async call another agent as a tool with conversation isolation"""
         from agents.agent_registry import AgentRegistry
+        import uuid
         
         registry = AgentRegistry()
-        other_agent = registry.get_agent(agent_name)
+        # Use unique conversation ID for isolation
+        call_conversation_id = str(uuid.uuid4())
+        other_agent = registry.get_agent(agent_name, call_conversation_id)
         
         if not other_agent:
             # Try to load agents from config first
             try:
                 registry.load_agents_from_config()
-                other_agent = registry.get_agent(agent_name)
+                other_agent = registry.get_agent(agent_name, call_conversation_id)
             except Exception:
                 pass
         
@@ -115,12 +118,14 @@ class BaseAgent(ABC):
             available_agents = list(registry.list_agents().keys())
             return f"Agent '{agent_name}' not found. Available agents: {available_agents}"
         
-        response = await other_agent.ainvoke(message, save_conversation=save_conversation)
+        # For tool calls, typically don't save conversation to avoid cross-contamination
+        # unless explicitly requested
+        response = await other_agent.ainvoke(message, save_conversation=False)
         return response
     
-    def call_agent(self, agent_name: str, message: str, save_conversation: bool = True) -> str:
+    def call_agent(self, agent_name: str, message: str) -> str:
         """Synchronous call agent (for backward compatibility) - runs async version"""
-        return asyncio.run(self.acall_agent(agent_name, message, save_conversation))
+        return asyncio.run(self.acall_agent(agent_name, message))
     
     def get_available_agents(self) -> Dict[str, str]:
         """Get list of all available agents in the system"""
