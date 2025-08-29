@@ -7,7 +7,7 @@ This module contains all the API endpoints for agent management, configuration, 
 from fastapi import APIRouter, HTTPException, Request, Depends
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Union
 import json
 import sys
 import asyncio
@@ -145,12 +145,12 @@ class AgentConfig(BaseModel):
     description: str
     model_type: str
     model_name: str
-    system_prompt: str
+    system_prompt: Union[str, List[str]]
     tools: List[str] = []
     parallel_tools: bool = True
     max_parallel_tools: int = 3
     debug: bool = False
-    memory: str = ""
+    memory: Union[str, List[str]] = ""
 
 class CreateAgentRequest(BaseModel):
     agent_name: str
@@ -287,7 +287,7 @@ async def create_agent(request: CreateAgentRequest, auth: bool = Depends(require
         "description": request.config.description,
         "model_type": request.config.model_type,
         "model_name": request.config.model_name,
-        "system_prompt": request.config.system_prompt,
+        "system_prompt": request.config.system_prompt,  # Keep as-is (str or list)
         "tools": request.config.tools,
         "parallel_tools": request.config.parallel_tools,
         "max_parallel_tools": request.config.max_parallel_tools,
@@ -321,7 +321,7 @@ async def update_agent(agent_name: str, config: AgentConfig, auth: bool = Depend
         "description": config.description,
         "model_type": config.model_type,
         "model_name": config.model_name,
-        "system_prompt": config.system_prompt,
+        "system_prompt": config.system_prompt,  # Keep as-is (str or list)
         "tools": config.tools,
         "parallel_tools": config.parallel_tools,
         "max_parallel_tools": config.max_parallel_tools,

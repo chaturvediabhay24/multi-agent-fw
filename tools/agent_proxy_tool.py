@@ -47,7 +47,13 @@ class AgentProxyTool(BaseTool):
             
             if self.agent_name in agent_configs:
                 agent_config = agent_configs[self.agent_name]
-                system_prompt = agent_config.get('system_prompt', '')
+                system_prompt_raw = agent_config.get('system_prompt', '')
+                
+                # Handle both str and list of str for system_prompt
+                if isinstance(system_prompt_raw, list):
+                    system_prompt = '\n'.join(system_prompt_raw)
+                else:
+                    system_prompt = system_prompt_raw
                 
                 # Extract first sentence or first 100 characters as description
                 if system_prompt:

@@ -53,8 +53,21 @@ class BaseAgent(ABC):
         
     async def ainvoke(self, message: str, save_conversation: bool = True) -> str:
         """Async main method to invoke the agent with a message"""
-        # Get system prompt if defined
-        system_prompt = self.config.get('system_prompt', '') + self.config.get('memory', '')
+        # Get system prompt if defined (handle both str and list of str)
+        system_prompt_raw = self.config.get('system_prompt', '')
+        if isinstance(system_prompt_raw, list):
+            system_prompt = '\n'.join(system_prompt_raw)
+        else:
+            system_prompt = system_prompt_raw
+            
+        # Handle memory field (both str and list of str)
+        memory_raw = self.config.get('memory', '')
+        if isinstance(memory_raw, list):
+            memory = '\n'.join(memory_raw)
+        else:
+            memory = memory_raw
+            
+        system_prompt += memory
         if system_prompt and not any(isinstance(msg, SystemMessage) for msg in self.conversation_history):
             self.add_system_message(system_prompt)
         
