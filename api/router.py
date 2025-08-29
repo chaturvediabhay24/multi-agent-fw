@@ -17,6 +17,7 @@ from pathlib import Path
 sys.path.append(str(Path(__file__).parent.parent))
 
 from agents.agent_registry import AgentRegistry
+from config.config_manager import ConfigManager
 
 # Memory-efficient tool call streaming using weak references and automatic cleanup
 import weakref
@@ -171,6 +172,9 @@ class SwitchModelRequest(BaseModel):
 AGENTS_CONFIG_PATH = Path(__file__).parent.parent / "config" / "agents.json"
 PROVIDERS_CONFIG_PATH = Path(__file__).parent.parent / "config" / "model_providers.json"
 
+# Global configuration manager
+config_manager = ConfigManager(str(Path(__file__).parent.parent / "config"))
+
 # Global registry for chat functionality
 registry = AgentRegistry()
 conversation_manager = ConversationManager()
@@ -198,23 +202,10 @@ def require_auth(request: Request):
 def load_agents_config():
     """Load existing agents configuration"""
     try:
-        if AGENTS_CONFIG_PATH.exists():
-            with open(AGENTS_CONFIG_PATH, 'r', encoding='utf-8') as f:
-                return json.load(f)
-        return {}
+        return config_manager.get_all_agent_configs()
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error loading config: {str(e)}")
 
-def save_agents_config(config_data):
-    """Save agents configuration to file"""
-    try:
-        # Ensure config directory exists
-        AGENTS_CONFIG_PATH.parent.mkdir(exist_ok=True)
-        
-        with open(AGENTS_CONFIG_PATH, 'w', encoding='utf-8') as f:
-            json.dump(config_data, f, indent=2, ensure_ascii=False)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error saving config: {str(e)}")
 
 def load_providers_config():
     """Load model providers configuration"""
@@ -285,14 +276,12 @@ async def create_agent(request: CreateAgentRequest, auth: bool = Depends(require
     
     agent_name = request.agent_name.strip()
     
-    # Load existing configuration
-    config = load_agents_config()
-    
     # Check if agent already exists
-    if agent_name in config:
+    existing_config = config_manager.get_agent_config(agent_name)
+    if existing_config:
         raise HTTPException(status_code=409, detail=f"Agent '{agent_name}' already exists")
     
-    # Convert Pydantic model to dict and format for agents.json
+    # Convert Pydantic model to dict and format for agent config
     agent_config = {
         "class": request.config.class_name,
         "description": request.config.description,
@@ -309,11 +298,8 @@ async def create_agent(request: CreateAgentRequest, auth: bool = Depends(require
     if request.config.debug:
         agent_config["debug"] = True
     
-    # Add new agent to configuration
-    config[agent_name] = agent_config
-    
-    # Save updated configuration
-    save_agents_config(config)
+    # Save agent configuration using ConfigManager
+    config_manager.add_agent_config(agent_name, agent_config)
     
     return {
         "message": f"Agent '{agent_name}' created successfully",
@@ -324,11 +310,9 @@ async def create_agent(request: CreateAgentRequest, auth: bool = Depends(require
 async def update_agent(agent_name: str, config: AgentConfig, auth: bool = Depends(require_auth)):
     """Update an existing agent configuration"""
     
-    # Load existing configuration
-    agents_config = load_agents_config()
-    
     # Check if agent exists
-    if agent_name not in agents_config:
+    existing_config = config_manager.get_agent_config(agent_name)
+    if not existing_config:
         raise HTTPException(status_code=404, detail=f"Agent '{agent_name}' not found")
     
     # Update agent configuration
@@ -348,10 +332,8 @@ async def update_agent(agent_name: str, config: AgentConfig, auth: bool = Depend
     if config.debug:
         agent_config["debug"] = True
     
-    agents_config[agent_name] = agent_config
-    
-    # Save updated configuration
-    save_agents_config(agents_config)
+    # Save updated agent configuration using ConfigManager
+    config_manager.add_agent_config(agent_name, agent_config)
     
     return {
         "message": f"Agent '{agent_name}' updated successfully",
@@ -362,18 +344,13 @@ async def update_agent(agent_name: str, config: AgentConfig, auth: bool = Depend
 async def delete_agent(agent_name: str, auth: bool = Depends(require_auth)):
     """Delete an agent from the configuration"""
     
-    # Load existing configuration
-    config = load_agents_config()
-    
     # Check if agent exists
-    if agent_name not in config:
+    existing_config = config_manager.get_agent_config(agent_name)
+    if not existing_config:
         raise HTTPException(status_code=404, detail=f"Agent '{agent_name}' not found")
     
-    # Remove agent from configuration
-    del config[agent_name]
-    
-    # Save updated configuration
-    save_agents_config(config)
+    # Remove agent configuration using ConfigManager
+    config_manager.remove_agent_config(agent_name)
     
     return {"message": f"Agent '{agent_name}' deleted successfully"}
 

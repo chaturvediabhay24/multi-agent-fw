@@ -1,8 +1,8 @@
-import json
 import os
 from typing import Any, Dict
 from .base_tool import BaseTool
 from pathlib import Path
+from config.config_manager import ConfigManager
 
 
 class ReadMemoryTool(BaseTool):
@@ -19,16 +19,14 @@ class ReadMemoryTool(BaseTool):
             '''
         )
         self.agent_name = agent_name
-        self.config_path = Path(__file__).parent.parent / "config" / "agents.json"
+        self.config_manager = ConfigManager(str(Path(__file__).parent.parent / "config"))
     
     def execute(self, **kwargs) -> str:
         """Read the agent's memory from agent config"""
         try:
-            if self.config_path.exists():
-                with open(self.config_path, 'r') as f:
-                    config = json.load(f)
-                    agent_config = config.get(self.agent_name, {})
-                    return agent_config.get('memory', '')
+            agent_config = self.config_manager.get_agent_config(self.agent_name)
+            if agent_config:
+                return agent_config.get('memory', '')
             else:
                 return ""
         except Exception as e:
@@ -70,7 +68,7 @@ class AppendMemoryTool(BaseTool):
             '''
         )
         self.agent_name = agent_name
-        self.config_path = Path(__file__).parent.parent / "config" / "agents.json"
+        self.config_manager = ConfigManager(str(Path(__file__).parent.parent / "config"))
     
     def execute(self, text: str = "", **kwargs) -> str:
         """Append text to the agent's memory in agent config"""
@@ -79,14 +77,8 @@ class AppendMemoryTool(BaseTool):
             if not text or text.strip() == "":
                 return "Error: No text provided to append to memory. Please provide text to store."
             
-            # Read existing config
-            config = {}
-            if self.config_path.exists():
-                with open(self.config_path, 'r') as f:
-                    config = json.load(f)
-            
-            # Get existing memory for this agent
-            agent_config = config.get(self.agent_name, {})
+            # Get existing agent config
+            agent_config = self.config_manager.get_agent_config(self.agent_name) or {}
             existing_memory = agent_config.get('memory', '')
             
             # Append new text with timestamp
@@ -102,16 +94,10 @@ class AppendMemoryTool(BaseTool):
             updated_memory = existing_memory + new_entry
             
             # Update agent config with new memory
-            if self.agent_name not in config:
-                config[self.agent_name] = {}
-            config[self.agent_name]['memory'] = updated_memory
+            agent_config['memory'] = updated_memory
             
-            # Ensure config directory exists
-            self.config_path.parent.mkdir(exist_ok=True)
-            
-            # Save updated config
-            with open(self.config_path, 'w') as f:
-                json.dump(config, f, indent=2)
+            # Save updated config using ConfigManager
+            self.config_manager.add_agent_config(self.agent_name, agent_config)
             
             return f"Memory updated successfully for agent '{self.agent_name}'. Added: {text.strip()}"
             
