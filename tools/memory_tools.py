@@ -79,19 +79,19 @@ class AppendMemoryTool(BaseTool):
             
             # Get existing agent config
             agent_config = self.config_manager.get_agent_config(self.agent_name) or {}
-            existing_memory = agent_config.get('memory', '')
+            existing_memory = agent_config.get('memory', [])
             
             # Append new text with timestamp
             from datetime import datetime
             timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             
             # Format the new entry nicely
-            if existing_memory.strip():
+            if existing_memory:
                 new_entry = f"\n\n[{timestamp}] {text.strip()}"
             else:
                 new_entry = f"[{timestamp}] {text.strip()}"
             
-            updated_memory = existing_memory + new_entry
+            updated_memory = existing_memory + [new_entry]
             
             # Update agent config with new memory
             agent_config['memory'] = updated_memory
